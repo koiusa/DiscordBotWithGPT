@@ -67,12 +67,12 @@ python3 -m src.main
 
 ### Discord command
 
-Create Thread Chat Start
+Chat Start on Thread 
 ```
 /thread "any message"
 ```
 
-Current Channel Chat Start
+Chat Start Current Channel
 ```
 /message "any message"
 ```
