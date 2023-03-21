@@ -14,8 +14,17 @@ Python 3.10.10
 gpt-3.5-turbo
 ```
 
+
+
 ### Setup
 
+#### Create Discord Bot
+ - [discord_developers](https://discord.com/developers/applications)
+ 
+#### Getting OpenApi ApiKey
+ - [openai_platform](https://platform.openai.com)
+
+#### Setting Env File
 ```
 1. Copy `.env.example` to `.env` and start filling in the values as detailed below
 2. Go to https://beta.openai.com/account/api-keys, create a new API key, and fill in `OPENAI_API_KEY`
@@ -51,7 +60,7 @@ python3 -m src.main
 ```
 
 
-### discord command
+### Discord command
 
 Create Thread Chat Start
 ```
