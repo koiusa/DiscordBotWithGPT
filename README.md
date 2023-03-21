@@ -47,5 +47,17 @@ python3 -m src.main
 ```
 
 
+### discord command
+
+Create Thread Chat Start
+```
+/thread "any message"
+```
+
+Current Channel Chat Start
+```
+/message "any message"
+```
+
 ### Reference
  - [gpt-discord-bot](https://github.com/openai/gpt-discord-bot)
