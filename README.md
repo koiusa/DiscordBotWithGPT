@@ -41,6 +41,7 @@ gpt-3.5-turbo
 
 ### Startup
 
+##### Environment
 ```
 cd path/to/DiscordBotWithGPT
 ```
@@ -57,6 +58,7 @@ source bin/activate
 pip install -r requirements.txt
 ```
 
+#### execution
 ```
 python3 -m src.main
 ```
