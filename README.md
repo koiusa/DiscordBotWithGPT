@@ -14,7 +14,7 @@ Python 3.10.10
 gpt-3.5-turbo
 ```
 
-
+---
 
 ### Setup
 
@@ -36,6 +36,8 @@ gpt-3.5-turbo
 5. Go to the OAuth2 tab, copy your "Client ID", and fill in `DISCORD_CLIENT_ID`
 6. Copy the ID the server you want to allow your bot to be used in by right clicking the server icon and clicking "Copy ID". Fill in `ALLOWED_SERVER_IDS`. If you want to allow multiple servers, separate the IDs by "," like `server_id_1,server_id_2`
 ```
+
+---
 
 ### Startup
 
@@ -59,6 +61,7 @@ pip install -r requirements.txt
 python3 -m src.main
 ```
 
+---
 
 ### Discord command
 
@@ -71,6 +74,8 @@ Current Channel Chat Start
 ```
 /message "any message"
 ```
+
+---
 
 ### Reference
  - [gpt-discord-bot](https://github.com/openai/gpt-discord-bot)
