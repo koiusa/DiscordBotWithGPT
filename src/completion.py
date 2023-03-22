@@ -5,6 +5,7 @@ from typing import Optional, List
 from src.constants import OPENAI_API_KEY, BOT_NAME
 from src.constants import (
     EXAMPLE_CONVOS,
+    OPENAI_MODEL,
 )
 from src.base import Message
 from src.utils import split_into_shorter_messages, close_thread, logger
@@ -30,14 +31,15 @@ async def generate_completion_response(
     messages: List[Message], user: str
 ) -> CompletionData:
     try:
-        print(messages)
+        logger.info(messages)
         openai.api_key = OPENAI_API_KEY
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model=OPENAI_MODEL,
             messages=[message.render() for message in messages],
         )
         reply = response.choices[0]["message"]["content"].strip()
-        print(reply)
+        logger.info(reply)
+        logger.info(response.usage)
         return CompletionData(
             status=CompletionResult.OK, reply_text=reply, status_text=None
         )

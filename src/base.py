@@ -26,5 +26,6 @@ class Conversation:
 
 @dataclass(frozen=True)
 class Config:
+    model: str
     name: str
     example_conversations: List[Conversation]
