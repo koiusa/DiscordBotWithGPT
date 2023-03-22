@@ -56,9 +56,14 @@ async def on_message(message):
         if message.author.bot:
             return
 
+        # ignore messages from self
+        if message.author == client.user:
+           return
+
         channel = message.channel
         if not isinstance(channel, discord.Thread):
-            await channel_chat(message=message,client=client)
+            if client.user in message.mentions:
+                await channel_chat(message=message,client=client)
         else:
             await thread_chat(message=message,client=client)
         
