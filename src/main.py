@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import discord
-import logging
 import os
 import sys
+import discord
+import logging
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 

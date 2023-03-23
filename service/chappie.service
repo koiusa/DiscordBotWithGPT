@@ -1,0 +1,12 @@
+[Unit]
+Description = chappie daemon
+
+[Service]
+Restart = no
+Type = simple
+ExecStart =
+User =
+
+[Install]
+WantedBy = multi-user.target
+
