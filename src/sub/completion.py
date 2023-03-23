@@ -2,13 +2,13 @@ import openai
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List
-from src.constants import OPENAI_API_KEY, BOT_NAME
-from src.constants import (
+from sub.constants import OPENAI_API_KEY, BOT_NAME
+from sub.constants import (
     EXAMPLE_CONVOS,
     OPENAI_MODEL,
 )
-from src.base import Message
-from src.utils import split_into_shorter_messages, close_thread, logger
+from sub.base import Message
+from sub.utils import split_into_shorter_messages, close_thread, logger
 
 import discord
 
@@ -36,6 +36,7 @@ async def generate_completion_response(
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
             messages=[message.render() for message in messages],
+            timeout = 10
         )
         reply = response.choices[0]["message"]["content"].strip()
         logger.info(reply)

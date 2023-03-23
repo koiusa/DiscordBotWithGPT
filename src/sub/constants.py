@@ -3,7 +3,7 @@ import os
 import dacite
 import yaml
 from typing import Dict, List
-from src.base import Config
+from sub.base import Config
 
 load_dotenv()
 
@@ -35,7 +35,7 @@ for s in server_channels:
 # Send Messages, Create Public Threads, Send Messages in Threads, Manage Messages, Manage Threads, Read Message History, Use Slash Command
 BOT_INVITE_URL = f"https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&permissions=328565073920&scope=bot"
 
-MAX_CHANNEL_MESSAGES = 50
+MAX_CHANNEL_MESSAGES = 10
 MAX_THREAD_MESSAGES = 50
 ACTIVATE_THREAD_PREFX = "💬✅"
 INACTIVATE_THREAD_PREFIX = "💬❌"

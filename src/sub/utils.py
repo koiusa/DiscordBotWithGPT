@@ -1,15 +1,15 @@
-from src.constants import (
+from sub.constants import (
     ALLOWED_SERVER_IDS,
 )
 import logging
 
 logger = logging.getLogger(__name__)
-from src.base import Message
+from sub.base import Message
 from discord import Message as DiscordMessage
 from typing import Optional, List
 import discord
 
-from src.constants import MAX_CHARS_PER_REPLY_MSG, INACTIVATE_THREAD_PREFIX
+from sub.constants import MAX_CHARS_PER_REPLY_MSG, INACTIVATE_THREAD_PREFIX
 
 
 def discord_message_to_message(message: DiscordMessage) -> Optional[Message]:
@@ -22,7 +22,7 @@ def discord_message_to_message(message: DiscordMessage) -> Optional[Message]:
         field = message.reference.cached_message.embeds[0].fields[0]
         if field.value:
             return Message(role="system", user=field.name, content=field.value)
-    else:
+    else:         
         if message.content:
             if message.author.bot:
                 return Message(role="assistant", user=message.author.name, content=message.content)

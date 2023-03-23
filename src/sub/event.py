@@ -1,17 +1,17 @@
 import discord
-from src.completion import (
+from sub.completion import (
     generate_completion_response,
     process_thread_response,
     process_channel_response,
 )
 import asyncio
-from src.utils import (
+from sub.utils import (
     logger,
     close_thread,
     is_last_message_stale,
     discord_message_to_message,
 )
-from src.constants import (
+from sub.constants import (
     ACTIVATE_THREAD_PREFX,
     MAX_THREAD_MESSAGES,
     MAX_CHANNEL_MESSAGES,
@@ -54,7 +54,7 @@ async def thread_chat(message, client: discord.Client) -> bool:
             f"Thread message to process - {message.author}: {message.content[:50]} - {thread.name} {thread.jump_url}"
         )
 
-        channel_messages = await get_channel_messages(channel, MAX_THREAD_MESSAGES)
+        channel_messages = await get_channel_messages(message, MAX_THREAD_MESSAGES)
 
         # generate the response
         async with thread.typing():
@@ -95,7 +95,7 @@ async def channel_chat(message, client: discord.Client) -> bool:
             f"Channel message to process - {message.author}: {message.content[:50]} - {channel.name} {channel.jump_url}"
         )
      
-     channel_messages = await get_channel_messages(channel, MAX_CHANNEL_MESSAGES)
+     channel_messages = await get_channel_messages(message, MAX_CHANNEL_MESSAGES)
      
      # generate the response
      async with channel.typing():
@@ -110,10 +110,10 @@ async def channel_chat(message, client: discord.Client) -> bool:
 
      return True
 
-async def get_channel_messages(channel, limit) -> []:
+async def get_channel_messages(message, limit) -> []:
      channel_messages = [
             discord_message_to_message(message)
-            async for message in channel.history(limit=limit)
+            async for message in message.channel.history(limit=limit)
         ]
      channel_messages = [x for x in channel_messages if x is not None]
      channel_messages.reverse()

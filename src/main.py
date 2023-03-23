@@ -1,24 +1,30 @@
+#!/usr/bin/env python3
 import discord
 import logging
-from src.base import Message, Conversation
-from src.constants import (
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+
+from sub.base import Message, Conversation
+from sub.constants import (
     BOT_INVITE_URL,
     DISCORD_BOT_TOKEN,
     EXAMPLE_CONVOS,
     ACTIVATE_THREAD_PREFX,
 )
-from src.utils import (
+from sub.utils import (
     logger,
     should_block,
 )
-from src import completion
-from src.completion import (
+from sub import completion
+from sub.completion import (
     generate_completion_response,
     process_thread_response,
     process_channel_response,
 )
-from src import event
-from src.event import (
+from sub import event
+from sub.event import (
     thread_chat,
     channel_chat,
 )
