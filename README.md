@@ -41,7 +41,8 @@ gpt-3.5-turbo
 
 ### Startup
 
-#### Environment
+#### Process
+ - Environment 
 ```
 cd path/to/DiscordBotWithGPT
 ```
@@ -58,16 +59,22 @@ source bin/activate
 pip install -r requirements.txt
 ```
 
-#### Execution (process)
+ - Execution
 ```
 python3 -m src.main
 ```
 
-#### Execution (service)
+#### Service
+ - Environment
+```
+cd path/to/DiscordBotWithGPT
+```
+
 ```
 bash configure.sh
 ```
 
+ - Execution
 ```
 sudo systemctl start chappie.service
 ```
