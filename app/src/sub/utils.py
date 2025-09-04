@@ -22,12 +22,23 @@ def discord_message_to_message(message: DiscordMessage) -> Optional[Message]:
         field = message.reference.cached_message.embeds[0].fields[0]
         if field.value:
             return Message(role="system", user=field.name, content=field.value)
-    else:         
-        if message.content:
-            if message.author.bot:
-                return Message(role="assistant", user=message.author.name, content=message.content)
+    else:
+        # Vision対応: 画像がある場合はcontentをリストで格納
+        if message.content or message.attachments:
+            role = "assistant" if message.author.bot else "user"
+            if message.attachments:
+                content_list = []
+                if message.content:
+                    content_list.append({"type": "text", "text": message.content})
+                for attachment in message.attachments:
+                    if hasattr(attachment, "content_type") and attachment.content_type and attachment.content_type.startswith("image/"):
+                        content_list.append({
+                            "type": "image_url",
+                            "image_url": {"url": attachment.url}
+                        })
+                return Message(role=role, user=message.author.name, content=content_list)
             else:
-                return Message(role="user", user=message.author.name, content=message.content)
+                return Message(role=role, user=message.author.name, content=message.content)
     return None
 
 

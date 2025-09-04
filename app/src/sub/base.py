@@ -1,12 +1,13 @@
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Union
 
 
 @dataclass(frozen=True)
 class Message:
     user: str
     role: str
-    content: Optional[str] = None
+    # Vision対応: contentはstrまたはlist（text/image_urlなど）
+    content: Optional[Union[str, list]] = None
 
     def render(self):
         return {"role": self.role, "content": self.content}
