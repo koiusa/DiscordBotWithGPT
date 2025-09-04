@@ -20,6 +20,7 @@ OPENAI_MODEL = CONFIG.model
 DISCORD_BOT_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 DISCORD_CLIENT_ID = os.environ["DISCORD_CLIENT_ID"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+PERMISSIONS = os.environ["PERMISSIONS"]
 
 ALLOWED_SERVER_IDS: List[int] = []
 server_ids = os.environ["ALLOWED_SERVER_IDS"].split(",")
@@ -33,7 +34,7 @@ for s in server_channels:
     SERVER_TO_MODERATION_CHANNEL[int(values[0])] = int(values[1])
 
 # Send Messages, Create Public Threads, Send Messages in Threads, Manage Messages, Manage Threads, Read Message History, Use Slash Command
-BOT_INVITE_URL = f"https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&permissions=328565073920&scope=bot"
+BOT_INVITE_URL = f"https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&permissions={PERMISSIONS}&scope=bot"
 
 MAX_CHANNEL_MESSAGES = 10
 MAX_THREAD_MESSAGES = 50

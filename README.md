@@ -77,7 +77,8 @@ Chat Start Current Channel
 /message "any message"
 ```
 
-また、＠Chappie "any Message" でもメッセージを送信できます。
+また、＠BotName "any Message" でもメッセージを送信できます。
+（※「＠BotName」はBot名なので、実際のBot名に置き換えてください）
 
 ---
 
