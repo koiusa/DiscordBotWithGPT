@@ -4,6 +4,14 @@ import sys
 import discord
 import logging
 
+# debugpyによるリモートデバッグ有効化
+try:
+    import debugpy
+    debugpy.listen(("0.0.0.0", 5679))
+    print("debugpy is listening on port 5679")
+except ImportError:
+    pass
+
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 
 from sub.base import Message, Conversation
@@ -56,21 +64,26 @@ async def on_message(message):
     try:
         # block servers not in allow list
         if should_block(guild=message.guild):
+            logger.info(f"Blocked guild {message.guild} {message.guild.id}")
             return
 
         # ignore messages from the bot
         if message.author.bot:
+            logger.info(f"ignore bot message from {message.author} {message.author.id}")
             return
 
         # ignore messages from self
         if message.author == client.user:
+           logger.info(f"ignore self message from {message.author} {message.author.id}")
            return
 
         channel = message.channel
         if not isinstance(channel, discord.Thread):
             if client.user in message.mentions:
+                logger.info(f"bot mentioned in message from {message.author} {message.author.id}")
                 await channel_chat(message=message,client=client)
         else:
+            logger.info(f"thread message from {message.author} {message.author.id}")
             await thread_chat(message=message,client=client)
         
     except Exception as e:

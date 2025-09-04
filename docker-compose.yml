@@ -1,0 +1,9 @@
+services:
+  python:
+    restart: always
+    build: .
+    container_name: "chappie"
+    working_dir: "/root/opt/app"
+    tty: true
+    volumes:
+      - ./app:/root/opt/app

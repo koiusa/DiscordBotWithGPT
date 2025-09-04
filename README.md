@@ -7,11 +7,11 @@
 
 ### Testing Env
 ```
-Python 3.10.10
+Python 3.12.3
 ```
 
 ```
-gpt-3.5-turbo
+gpt-4.1
 ```
 
 ---
@@ -25,6 +25,18 @@ gpt-3.5-turbo
  - [openai_platform](https://platform.openai.com)
 
 #### Setting Env File
+以下の手順で.envファイルを作成・設定してください。
+
+1. `.env.example` をコピーして `.env` ファイルを作成します。
+    ```bash
+    cp .env.example .env
+    ```
+2. `.env` ファイルを開き、必要な値を記入します。
+    - `OPENAI_API_KEY` には OpenAI の API キーを入力します。
+    - `DISCORD_BOT_TOKEN` には Discord Bot のトークンを入力します。
+    - `DISCORD_CLIENT_ID` には Discord アプリのクライアントIDを入力します。
+    - `ALLOWED_SERVER_IDS` にはBotを許可するサーバーIDをカンマ区切りで入力します。
+3. 必要に応じて他の項目も設定してください。
 ```
 1. Copy `.env.example` to `.env` and start filling in the values as detailed below
 2. Go to https://beta.openai.com/account/api-keys, create a new API key, and fill in `OPENAI_API_KEY`
@@ -41,43 +53,15 @@ gpt-3.5-turbo
 
 ### Startup
 
-#### Process
- - Environment 
-```
+#### Docker Compose で起動
+
+```bash
 cd path/to/DiscordBotWithGPT
+docker-compose up -d
 ```
 
-```
-python3 -m venv .
-```
-
-```
-source bin/activate
-```
-
-```
-pip install -r requirements.txt
-```
-
- - Execution
-```
-python3 -m src.main
-```
-
-#### Service
- - Environment
-```
-cd path/to/DiscordBotWithGPT
-```
-
-```
-bash configure.sh
-```
-
- - Execution
-```
-sudo systemctl start chappie.service
-```
+- 初回起動時は `.env` の設定を忘れずに行ってください。
+- サービスの停止は `docker-compose down` で可能です。
 
 ---
 
@@ -92,6 +76,8 @@ Chat Start Current Channel
 ```
 /message "any message"
 ```
+
+また、＠Chappie "any Message" でもメッセージを送信できます。
 
 ---
 
