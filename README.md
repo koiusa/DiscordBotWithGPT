@@ -7,7 +7,20 @@
 
 ### Testing Env
 ```
-Python 3.12.3
+$ cat /etc/os-release
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.3 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
 ```
 
 ```
@@ -37,16 +50,17 @@ gpt-4.1
     - `DISCORD_CLIENT_ID` には Discord アプリのクライアントIDを入力します。
     - `ALLOWED_SERVER_IDS` にはBotを許可するサーバーIDをカンマ区切りで入力します。
 3. 必要に応じて他の項目も設定してください。
-```
-1. Copy `.env.example` to `.env` and start filling in the values as detailed below
-2. Go to https://beta.openai.com/account/api-keys, create a new API key, and fill in `OPENAI_API_KEY`
-3. Create your own Discord application at https://discord.com/developers/applications
-4. Go to the Bot tab and click "Add Bot"
-    - Click "Reset Token" and fill in `DISCORD_BOT_TOKEN`
-    - Disable "Public Bot" unless you want your bot to be visible to everyone
-    - Enable "Message Content Intent" under "Privileged Gateway Intents"
-5. Go to the OAuth2 tab, copy your "Client ID", and fill in `DISCORD_CLIENT_ID`
-6. Copy the ID the server you want to allow your bot to be used in by right clicking the server icon and clicking "Copy ID". Fill in `ALLOWED_SERVER_IDS`. If you want to allow multiple servers, separate the IDs by "," like `server_id_1,server_id_2`
+
+#### モデル・システムプロンプトの設定
+`app/src/sub/config.yaml` で、使用するAIモデルやシステムプロンプトの内容を設定できます。
+```bash app/src/sub/config.yaml
+model: gpt-4.1
+name: Chappie
+example_conversations:
+  - messages:
+    - role: system
+      user: nobody
+      content: あなたはChappieです。優秀なAIアシスタントでユーザーの様々な質問に答えます。
 ```
 
 ---
