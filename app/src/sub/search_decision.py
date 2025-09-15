@@ -20,8 +20,10 @@ from typing import List, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass
 import re
+import datetime
 from sub.base import Message
-from sub.utils import logger
+import os
+from sub.utils import logger, log_event
 
 # Enrich keywords used during optimization to inject recency tokens
 _QUERY_ENRICH_KEYWORDS = ["株価", "為替", "ニュース", "速報", "物価", "金利"]
@@ -47,6 +49,11 @@ class SearchConfig:
         self.question_score = question_score
         self.factual_score = factual_score
 
+_CURRENT_YEAR = datetime.datetime.now().year
+_PREV_YEAR = _CURRENT_YEAR - 1
+
+_AGGRESSIVE = os.environ.get("SEARCH_AGGRESSIVE_MODE", "0") in ("1", "true", "True")
+
 DEFAULT_SEARCH_CONFIG = SearchConfig(
     search_patterns=[
         r"最新.+?(情報|データ|状況)",
@@ -66,9 +73,9 @@ DEFAULT_SEARCH_CONFIG = SearchConfig(
         r".+?のイベント",
     ],
     question_words=["何", "いつ", "どこ", "だれ", "どう", "なぜ", "どの", "どんな"],
-    factual_keywords=["2024", "2025", "今年", "現在", "最新", "今", "最近"],
+    factual_keywords=[str(_PREV_YEAR), str(_CURRENT_YEAR), "今年", "現在", "最新", "今", "最近"],
     enrich_keywords=_QUERY_ENRICH_KEYWORDS,
-    min_score=2,
+    min_score=1 if _AGGRESSIVE else 2,
 )
 
 def _detect_datetime_direct_answer(text: str) -> Optional[str]:
@@ -120,13 +127,14 @@ def _optimize_query(query: str, enrich_keywords: List[str]) -> str:
     q = re.sub(r"[（）「」『』【】［］]", " ", q)
     q = re.sub(r"\s+", " ", q).strip()
     lowered = q.lower()
-    needs_time_boost = not any(k in lowered for k in ["2024", "2025", "最新", "現在"]) and len(q) < 60
+    years_tokens = [str(_CURRENT_YEAR), str(_PREV_YEAR)]
+    needs_time_boost = not any(k in lowered for k in years_tokens + ["最新", "現在"]) and len(q) < 60
     if any(k in q for k in enrich_keywords) and needs_time_boost:
-        q = f"{q} 現在 2025 最新"
+        q = f"{q} 現在 {_CURRENT_YEAR} 最新"
     if len(q) > 120:
         q = q[:120]
     if q != original:
-        logger.info(f"query_optimized before='{original}' after='{q}'")
+        log_event("query_opt", before=original, after=q)
     return q
 
 class SearchDecisionType(Enum):
@@ -152,7 +160,7 @@ def should_perform_web_search(messages: List[Message], config: SearchConfig = DE
 
     dt_answer = _detect_datetime_direct_answer(latest_lower)
     if dt_answer:
-        logger.info("search_decision type=DATETIME_ANSWER reasons=['datetime_pattern']")
+        log_event("search_decision", type=SearchDecisionType.DATETIME_ANSWER.value, reasons='datetime_pattern')
         return SearchDecision(
             decision=SearchDecisionType.DATETIME_ANSWER,
             direct_answer=dt_answer,
@@ -161,13 +169,19 @@ def should_perform_web_search(messages: List[Message], config: SearchConfig = DE
         )
 
     score, reasons = _evaluate_search_need(latest_lower, config)
+    # Aggressive mode: 追加ヒューリスティック
+    if _AGGRESSIVE and score == 0:
+        # 質問文疑似: 末尾が「?」 / 日本語の「？」 / '教えて' / 'とは'
+        if any(latest_lower.endswith(suf) for suf in ["?", "？"]) or any(k in latest_lower for k in ["教えて", "とは", "まとめて", "一覧"]):
+            score = 1
+            reasons.append("aggressive_form")
     if score < config.min_score:
-        logger.info(f"search_decision type=NONE score={score} reasons={reasons}")
+        log_event("search_decision", type=SearchDecisionType.NONE.value, score=score, reasons=','.join(reasons) if reasons else None)
         return SearchDecision(SearchDecisionType.NONE, score=score, reasons=reasons)
 
     query = _clean_search_query(latest_raw)
     query = _optimize_query(query, config.enrich_keywords)
-    logger.info(f"search_decision type=QUERY score={score} reasons={reasons} query='{query}'")
+    log_event("search_decision", type=SearchDecisionType.QUERY.value, score=score, reasons=','.join(reasons) if reasons else None, query=query[:120])
     return SearchDecision(
         decision=SearchDecisionType.QUERY,
         query=query[:100],

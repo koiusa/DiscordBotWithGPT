@@ -57,3 +57,10 @@ SECONDS_DELAY_RECEIVING_MSG = (
 
 # History management for user identification
 HISTORY_MAX_ITEMS = int(os.environ.get("HISTORY_MAX_ITEMS", "30"))
+
+# Respond without explicit mention in normal channel messages (0/1). Default=1 (enabled)
+RESPOND_WITHOUT_MENTION = int(os.environ.get("RESPOND_WITHOUT_MENTION", "1"))
+
+# Simple per-user rate limiting (only applied to non-addressed fallback path)
+RATE_LIMIT_WINDOW_SEC = int(os.environ.get("RATE_LIMIT_WINDOW_SEC", "30"))  # sliding window seconds
+RATE_LIMIT_MAX_EVENTS = int(os.environ.get("RATE_LIMIT_MAX_EVENTS", "5"))   # max messages per user per window

@@ -3,7 +3,7 @@ import time
 import openai
 from typing import List, Dict, Any, Optional, Tuple
 from sub.constants import OPENAI_API_KEY, OPENAI_MODEL
-from sub.utils import logger
+from sub.utils import logger, log_event
 
 # Public semaphore size can be tuned later
 _DEFAULT_CONCURRENCY = 3
@@ -50,6 +50,14 @@ async def chat(
                     'attempt': attempt,
                     'purpose': purpose,
                 }
+                try:
+                    usage = getattr(resp, 'usage', None) or {}
+                    prompt_t = usage.get('prompt_tokens') if isinstance(usage, dict) else None
+                    comp_t = usage.get('completion_tokens') if isinstance(usage, dict) else None
+                    total_t = usage.get('total_tokens') if isinstance(usage, dict) else None
+                    log_event("openai_call", attempt=attempt, purpose=purpose, invoke_ms=f"{invoke_ms:.1f}", queue_wait_ms=f"{queue_wait_ms:.1f}", prompt_tokens=prompt_t, completion_tokens=comp_t, total_tokens=total_t, model=(model or OPENAI_MODEL))
+                except Exception:
+                    pass
                 return resp, metrics
             except Exception as e:
                 last_exc = e
@@ -57,9 +65,10 @@ async def chat(
                     'rate limit', 'timeout', 'temporar', 'overloaded', '503'
                 ])
                 if attempt == max_attempts or not retriable:
-                    logger.error(f"openai_call_failed purpose={purpose} attempt={attempt} retriable={retriable} error={e}")
+                    log_event("openai_call_failed", purpose=purpose, attempt=attempt, retriable=retriable, error=str(e)[:300])
                     raise
                 sleep_for = backoff_base * (2 ** (attempt - 1))
                 jitter = 0.05 * sleep_for
+                log_event("openai_retry", attempt=attempt, sleep_ms=int((sleep_for + jitter)*1000), retriable=retriable)
                 await asyncio.sleep(sleep_for + jitter)
         raise OpenAIError(str(last_exc))  # safety

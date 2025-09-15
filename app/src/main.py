@@ -23,10 +23,14 @@ from sub.constants import (
     EXAMPLE_CONVOS,
     ACTIVATE_THREAD_PREFX,
     HISTORY_MAX_ITEMS,
+    RESPOND_WITHOUT_MENTION,
+    RATE_LIMIT_WINDOW_SEC,
+    RATE_LIMIT_MAX_EVENTS,
 )
 from sub.utils import (
     logger,
     should_block,
+    log_event,
 )
 from sub import completion
 from sub.completion import (
@@ -42,6 +46,7 @@ from sub.event import (
 from sub.history_store import HistoryStore
 from sub.websearch import perform_web_search, format_search_results
 from sub.dedup import GLOBAL_MESSAGE_DEDUP
+from sub.rate_limit import build_rate_limiter
 
 
 logging.basicConfig(
@@ -53,18 +58,19 @@ intents.message_content = True  # メッセージ本文取得
 intents.guilds = True
 intents.members = False
 intents.typing = False
-logger.info(f"[startup] intents configured message_content={intents.message_content} guilds={intents.guilds}")
+log_event("startup_intents", message_content=intents.message_content, guilds=intents.guilds)
 
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 # Initialize global history store
 history_store = HistoryStore(max_items=HISTORY_MAX_ITEMS)
+rate_limiter = build_rate_limiter(RATE_LIMIT_WINDOW_SEC, RATE_LIMIT_MAX_EVENTS)
 
 @client.event
 async def on_ready():
-    logger.info(f"We have logged in as {client.user}. Invite URL: {BOT_INVITE_URL}")
-    logger.info(f"[diag] connected guild count={len(client.guilds)}")
+    log_event("login", user=str(client.user), invite_url=BOT_INVITE_URL)
+    log_event("guild_connected", guild_count=len(client.guilds))
     completion.READY_BOT_NAME = client.user.name
     completion.READY_BOT_EXAMPLE_CONVOS = [Conversation(messages=[m for m in c.messages]) for c in EXAMPLE_CONVOS]
     await tree.sync()
@@ -74,7 +80,7 @@ async def heartbeat_task():
     while True:
         try:
             latency_ms = client.latency * 1000 if client.latency else None
-            logger.info(f"[health] alive latency={latency_ms:.1f}ms" if latency_ms is not None else "[health] alive latency=n/a")
+            log_event("heartbeat", latency_ms=f"{latency_ms:.1f}" if latency_ms is not None else None)
         except Exception as e:
             logger.warning(f"[health] heartbeat error: {e}")
         await asyncio.sleep(30)
@@ -87,7 +93,7 @@ def schedule_background_tasks():
         try:
             from sub.websearch import perform_web_search
             result = await perform_web_search("diagnostic connectivity", max_results=1)
-            logger.info(f"[diag] websearch_connectivity status={result.status.name} error={result.error_message}")
+            log_event("websearch_connectivity", status=result.status.name, error=result.error_message)
         except Exception as e:
             logger.warning(f"[diag] websearch_connectivity failed error={e}")
     client.loop.create_task(_quick_test())
@@ -130,40 +136,48 @@ def _is_message_addressed(msg: discord.Message, bot_user: discord.User) -> Tuple
 @client.event
 async def on_message(message):
     try:
-        logger.info(f"[event:on_message] author={getattr(message.author,'id',None)} bot={getattr(message.author,'bot',None)} channel={getattr(message.channel,'id',None)} preview='{(message.content[:40] if hasattr(message,'content') else '')}'")
+        log_event("on_message", author_id=getattr(message.author,'id',None), is_bot=getattr(message.author,'bot',None), channel_id=getattr(message.channel,'id',None), preview=(message.content[:40] if hasattr(message,'content') else None))
         # Duplicate suppression (e.g., Discord client resend / network glitch)
         mid = getattr(message, 'id', None)
         if mid is not None:
             if GLOBAL_MESSAGE_DEDUP.seen(mid):
-                logger.info(f"[dedup] duplicate_message_skip id={mid}")
+                log_event("duplicate_skip", message_id=mid)
                 return
             GLOBAL_MESSAGE_DEDUP.mark(mid)
         # block servers not in allow list
         if should_block(guild=message.guild):
-            logger.info(f"Blocked guild {message.guild} {message.guild.id}")
+            log_event("guild_blocked", guild_id=getattr(message.guild,'id',None))
             return
 
         # ignore messages from the bot
         if message.author.bot:
-            logger.info(f"ignore bot message from {message.author} {message.author.id}")
+            log_event("ignore_bot_message", author_id=getattr(message.author,'id',None))
             return
 
         # ignore messages from self
         if message.author == client.user:
-           logger.info(f"ignore self message from {message.author} {message.author.id}")
+           log_event("ignore_self_message", author_id=getattr(message.author,'id',None))
            return
 
         channel = message.channel
         if isinstance(channel, discord.Thread):
-            logger.info(f"thread message from {message.author} {message.author.id}")
+            log_event("thread_message", author_id=getattr(message.author,'id',None), thread_id=getattr(channel,'id',None))
             await thread_chat(message=message, client=client, history_store=history_store)
             return
 
         addressed, reasons = _is_message_addressed(message, client.user)
-        logger.info(f"[address_check] addressed={addressed} reasons={','.join(reasons) if reasons else '-'} author={message.author.id} preview='{message.content[:60]}'")
+        log_event("address_check", addressed=addressed, reasons=','.join(reasons) if reasons else None, author_id=getattr(message.author,'id',None), preview=message.content[:60])
         if not addressed:
-            return
-        logger.info(f"bot addressed (reasons={reasons}) in message from {message.author} {message.author.id}")
+            if RESPOND_WITHOUT_MENTION:
+                # apply simple per-user rate limit to avoid spam
+                uid = getattr(message.author, 'id', None)
+                if uid is not None and not rate_limiter.allow(uid):
+                    log_event("rate_limit_drop", user_id=uid, window_s=RATE_LIMIT_WINDOW_SEC, max_events=RATE_LIMIT_MAX_EVENTS)
+                    return
+                log_event("fallback_respond", reason="respond_without_mention")
+            else:
+                return
+        log_event("address_accept", author_id=getattr(message.author,'id',None), reasons=','.join(reasons) if reasons else None)
         await channel_chat(message=message, client=client, history_store=history_store)
         
     except Exception as e:
@@ -187,7 +201,7 @@ async def thread_command(int: discord.Interaction, message: str):
             return
 
         user = int.user
-        logger.info(f"Thread command by {user} {message[:20]}")
+        log_event("thread_command", user_id=getattr(user,'id',None))
         try:
             embed = discord.Embed(
                 description=f"<@{user.id}> wants to chat! 🤖💬",
@@ -245,7 +259,7 @@ async def message_command(int: discord.Interaction, message: str):
             return
 
         user = int.user
-        logger.info(f"Message command by {user} {message[:20]}")
+        log_event("message_command", user_id=getattr(user,'id',None))
         
         try:
             embed = discord.Embed(
@@ -293,7 +307,7 @@ async def websearch_command(int: discord.Interaction, query: str):
             return
 
         user = int.user
-        logger.info(f"Web search command by {user} query: {query[:50]}")
+        log_event("websearch_command", user_id=getattr(user,'id',None), query_preview=query[:50])
         
         # Acknowledge the command immediately
         await int.response.defer()

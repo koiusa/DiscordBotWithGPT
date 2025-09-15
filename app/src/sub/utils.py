@@ -2,6 +2,8 @@ from sub.constants import (
     ALLOWED_SERVER_IDS,
 )
 import logging
+import time
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 from sub.base import Message
@@ -82,3 +84,39 @@ def should_block(guild: Optional[discord.Guild]) -> bool:
         logger.info(f"Guild {guild} not allowed")
         return True
     return False
+
+
+# ---------------- Structured logging helpers -----------------
+_LOG_START_TIME = time.time()
+
+def _fmt_val(v: Any) -> str:
+    if v is None:
+        return "-"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    # 空白や = を含む場合は引用
+    if any(ch in s for ch in [' ', '=', '\n', '\t']):
+        s = s.replace('\n', '↵')[:400]
+        return f'"{s}"'
+    return s[:400]
+
+def log_event(event: str, **fields: Any) -> None:
+    """統一イベントログ: event=<name> kv... を 1 行で出力。
+    目的:
+      - grep / 集計容易化
+      - 監視基盤投入時のパース容易化
+    慣例:
+      - 数値: そのまま
+      - 文字列: 空白/改行/ = 含めば引用
+      - 省略値/不在: '-'
+      - 経過時間: 起動からの秒 `uptime_s`
+    """
+    uptime = time.time() - _LOG_START_TIME
+    base: Dict[str, Any] = {"event": event, "uptime_s": f"{uptime:.1f}"}
+    base.update(fields)
+    parts = []
+    for k, v in base.items():
+        parts.append(f"{k}={_fmt_val(v)}")
+    logger.info(' '.join(parts))
+

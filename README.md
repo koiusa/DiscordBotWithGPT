@@ -1,3 +1,35 @@
+## 機能一覧
+ - レートリミット (非メンション自動応答)
+ - 検索積極モード (SEARCH_AGGRESSIVE_MODE)
+- 構造化ログ (event=... key=value ... 形式)
+## 開発 / 運用 Tips
+### ログ
+本Botは主要イベントを 1 行 = 1 イベントの構造化ログで出力します。
+
+形式:
+```
+event=<名称> uptime_s=<起動から秒> key1=value1 key2="空白含む値" ...
+```
+
+主なイベント例:
+```
+event=on_message author_id=123456 channel_id=789012 preview="hello" uptime_s=12.3
+event=address_check addressed=True reasons=name_prefix uptime_s=12.3
+event=search_decision type=query score=3 reasons=pattern:.*最新 uptime_s=12.4 query="GPU 市場 現在 2025 最新"
+event=openai_call attempt=1 purpose=completion invoke_ms=842.1 queue_wait_ms=0.3 prompt_tokens=142 completion_tokens=256 total_tokens=398 model=gpt-4o
+event=openai_retry attempt=1 sleep_ms=800 retriable=True
+event=openai_call_failed purpose=completion attempt=3 retriable=True error="rate limit"
+event=websearch_connectivity status=OK error=-
+```
+
+検索判定や OpenAI 呼び出しは再試行/失敗/成功をそれぞれ別イベントで可観測化。
+
+集計例 (シェル):
+```bash
+grep 'event=openai_call ' bot.log | awk '{for(i=1;i<=NF;i++){if($i~"invoke_ms="){sub("invoke_ms=","",$i);print $i}}}' | awk '{sum+=$1; n++} END{print "avg_invoke_ms="sum/n}'
+```
+
+カスタム解析ツールへ投入しやすいシンプル形式を優先。JSON が必要な場合は log_event 実装を差し替えても良いです。
 # DiscordBotWithGPT
 
 
@@ -143,6 +175,12 @@ openai_metrics decision=QUERY decision_score=3 decision_reasons=['pattern:.*最�
 | `SUMMARY_MODEL` | 要約モデル (未指定ならメイン) | gpt-4o-mini | main model |
 | `WEBSEARCH_CACHE_TTL` | 検索キャッシュ TTL 秒 | 300 | 180 |
 | `WEBSEARCH_CACHE_MAX` | キャッシュ最大件数 | 256 | 128 |
+| `RESPOND_WITHOUT_MENTION` | メンション無しでも通常チャンネルで自動応答(1で有効) | 1 | 1 |
+| `RATE_LIMIT_WINDOW_SEC` | 非メンション自動応答対象のレート制限ウィンドウ秒 | 30 | 30 |
+| `RATE_LIMIT_MAX_EVENTS` | ウィンドウ内ユーザー毎最大メッセージ数 | 5 | 5 |
+| `DISCLAIMER_ENABLE_ENGLISH` | 英語の免責/不要定型文も除去 (1=する/0=しない) | 1 | 1 |
+| `DISCLAIMER_EXTRA_PATTERNS` | 追加除去したい正規表現パターン(|区切り) |  |  |
+| `SEARCH_AGGRESSIVE_MODE` | 検索トリガを緩和し積極的に検索 (1=有効) | 0 | 0 |
 
 `.env.example` を参照して `.env` を作成してください。
 
@@ -158,4 +196,22 @@ openai_metrics decision=QUERY decision_score=3 decision_reasons=['pattern:.*最�
 echo ".env" >> .gitignore
 ```
 既に push 済みのキーは public から必ず撤収 (ローテ) してください。
+
+### メンション不要応答オプション
+`RESPOND_WITHOUT_MENTION=1` を有効化すると、Bot への明示メンションや名前プレフィックスが無くても通常チャンネル発言に反応します。
+
+推奨運用:
+1. Bot専用チャンネルを用意しノイズを隔離
+2. 他Botとの応答ループは `author.bot` 無視で回避済み
+3. 必要なら将来: レート制限 (例: 発話間隔 or 1分あたりN件) 導入を検討
+4. `RESPOND_WITHOUT_MENTION=0` に戻せば従来どおりメンション/名前/リプライ時のみ応答
+5. スパム保護: `RATE_LIMIT_WINDOW_SEC` (既定30秒) と `RATE_LIMIT_MAX_EVENTS` (既定5件) を超えると非メンション自動応答を一時的に無視
+
+### 積極検索モード
+`SEARCH_AGGRESSIVE_MODE=1` を設定すると以下が有効になります:
+1. スコア閾値 `min_score` を 2 → 1 に引き下げ (より多くのメッセージで検索)
+2. 明示的スコア0でも以下条件で検索候補化: 末尾 `?` / `？` / 含む語: `教えて`, `とは`, `まとめて`, `一覧`
+3. ログに `aggressive_form` が理由として追加されるケースあり
+用途: 情報探索寄りのサーバーで検索ヒット率を高めたい場合。
+注意: 外部検索回数増 → レイテンシ/トークン消費上昇。
 
