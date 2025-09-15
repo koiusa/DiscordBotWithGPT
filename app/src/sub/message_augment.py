@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
+import re
 from sub.base import Message
 from sub.utils import logger
 
@@ -11,6 +12,12 @@ INJECTED_SEARCH_GUIDELINE_JA = (
     "最新ニュース系の質問に対して、上に最新検索結果がある場合は『リアルタイム取得できません』等の定型免責を繰り返さず、検索結果と一般知識を統合し簡潔で正確な日本語要約を提供してください。"
 )
 
+# セクション化: 既存 system メッセージ内の管理領域を差分更新
+SECTION_CONV = "### <CONVERSATION_CONTEXT>"
+SECTION_SEARCH = "### <SEARCH_CONTEXT>"
+SECTION_GUIDELINE = "### <GUIDELINE>"
+MANAGED_SECTIONS = [SECTION_CONV, SECTION_SEARCH, SECTION_GUIDELINE]
+
 @dataclass
 class AugmentMeta:
     conversation_truncated: bool
@@ -19,6 +26,8 @@ class AugmentMeta:
     search_injected: bool
     guideline_injected: bool
     added_system: bool
+    diff_mode: bool  # 既存systemをセクション差分置換した場合 True
+    sections_applied: List[str]
 
 @dataclass
 class AugmentResult:
@@ -73,7 +82,19 @@ def augment_messages(
         guideline_injected = True
 
     if not parts:
-        return AugmentResult(rendered, AugmentMeta(False, original_chars, used_chars, bool(search_context), False, False))
+        return AugmentResult(
+            rendered,
+            AugmentMeta(
+                False,
+                original_chars,
+                used_chars,
+                bool(search_context),
+                False,
+                False,
+                False,
+                [],
+            ),
+        )
 
     combined_block = "\n".join(parts)
 
@@ -88,15 +109,48 @@ def augment_messages(
         return block.strip() in target
 
     added_system = False
+    diff_mode = False
+    sections_applied: List[str] = []
     if system_found:
-        # 重複挿入チェック（簡易: 完全一致含有）
-        if not _already_contains(system_found.get("content", ""), conversation_block):
-            # 末尾に追記
-            system_found["content"] = (system_found.get("content", "").rstrip() + "\n\n" + combined_block).strip()
-        else:
-            logger.info("augment: skip duplicate conversation_block")
+        original_system = system_found.get("content", "")
+        # 既存管理セクションを除去
+        cleaned = original_system
+        for header in MANAGED_SECTIONS:
+            pattern = re.compile(rf'^({re.escape(header)})\n(?:.*?)(?=^### <|\Z)', re.M | re.S)
+            cleaned = re.sub(pattern, '', cleaned)
+        cleaned = cleaned.strip()
+
+        # 新セクション組み立て
+        new_sections: List[str] = []
+        if conversation_block:
+            new_sections.append(f"{SECTION_CONV}\n{conversation_block}")
+            sections_applied.append(SECTION_CONV)
+        if search_context:
+            new_sections.append(f"{SECTION_SEARCH}\n{search_context}")
+            sections_applied.append(SECTION_SEARCH)
+        if search_executed:
+            new_sections.append(f"{SECTION_GUIDELINE}\n{INJECTED_SEARCH_GUIDELINE_JA}")
+            sections_applied.append(SECTION_GUIDELINE)
+
+        rebuilt = (cleaned + "\n\n" + "\n\n".join(new_sections)).strip() if cleaned else "\n\n".join(new_sections)
+        system_found["content"] = rebuilt
+        diff_mode = True
     else:
-        rendered.insert(0, {"role": "system", "content": combined_block})
+        # 新規 system 作成 (セクション形式)
+        if conversation_block:
+            sections_applied.append(SECTION_CONV)
+        if search_context:
+            sections_applied.append(SECTION_SEARCH)
+        if search_executed:
+            sections_applied.append(SECTION_GUIDELINE)
+        section_blocks: List[str] = []
+        if conversation_block:
+            section_blocks.append(f"{SECTION_CONV}\n{conversation_block}")
+        if search_context:
+            section_blocks.append(f"{SECTION_SEARCH}\n{search_context}")
+        if search_executed:
+            section_blocks.append(f"{SECTION_GUIDELINE}\n{INJECTED_SEARCH_GUIDELINE_JA}")
+        rendered.insert(0, {"role": "system", "content": "\n\n".join(section_blocks)})
         added_system = True
 
     meta = AugmentMeta(
@@ -106,16 +160,20 @@ def augment_messages(
         search_injected=bool(search_context),
         guideline_injected=guideline_injected,
         added_system=added_system,
+        diff_mode=diff_mode,
+        sections_applied=sections_applied,
     )
 
     logger.info(
-        "augment_meta truncated=%s orig_chars=%d used_chars=%d search_injected=%s guideline=%s added_system=%s",
+        "augment_meta truncated=%s orig_chars=%d used_chars=%d search_injected=%s guideline=%s added_system=%s diff_mode=%s sections=%s",
         meta.conversation_truncated,
         meta.conversation_original_chars,
         meta.conversation_used_chars,
         meta.search_injected,
         meta.guideline_injected,
         meta.added_system,
+        meta.diff_mode,
+        ','.join(meta.sections_applied),
     )
 
     return AugmentResult(rendered, meta)
