@@ -2,6 +2,7 @@ import openai
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List
+import re
 from sub.constants import OPENAI_API_KEY, BOT_NAME
 from sub.constants import (
     EXAMPLE_CONVOS,
@@ -9,6 +10,8 @@ from sub.constants import (
 )
 from sub.base import Message
 from sub.utils import split_into_shorter_messages, close_thread, logger
+from sub.websearch import perform_web_search, format_search_results
+from sub.search_decision import should_perform_web_search
 
 import discord
 
@@ -27,14 +30,44 @@ class CompletionData:
     reply_text: Optional[str]
     status_text: Optional[str]
 
+
 async def generate_completion_response(
     messages: List[Message], user: str, conversation_context: str = None
 ) -> CompletionData:
     try:
         logger.info(messages)
+
+        # 株価等の専用ロジックは排除し、汎用フローのみで処理
+        
+        # Web検索が必要かどうか判定
+        search_query = should_perform_web_search(messages)
+        search_context = ""
+        
+        if search_query:
+            logger.info(f"Web search triggered for query: {search_query}")
+            try:
+                search_data = await perform_web_search(search_query, max_results=3)
+                logger.info(f"Web search raw result: status={search_data.status}, error={search_data.error_message}, results={search_data.results}")
+                if search_data.status.name == "OK" and search_data.results:
+                    # 検索結果をコンテキストとして整理
+                    search_context = "\n\n【Web検索結果】\n"
+                    for i, result in enumerate(search_data.results[:3], 1):
+                        title = result.get('title', 'タイトルなし')
+                        snippet = result.get('snippet', 'スニペットなし')
+                        url = result.get('url', '')
+                        search_context += f"{i}. {title}\n{snippet}\n{url}\n\n"
+                    logger.info(f"Search context added: {len(search_context)} characters")
+                else:
+                    # 検索結果が無い場合も、検索を試行したことをAIに伝える
+                    search_context = f"\n\n【Web検索情報】\n「{search_query}」について検索を試行しましたが、具体的な最新情報は取得できませんでした。一般的な知識で回答してください。\n"
+                    logger.info("Web search returned no results, providing fallback context")
+            except Exception as e:
+                logger.error(f"Web search failed: {e}")
+                # エラー時も検索を試行したことを伝える
+                search_context = f"\n\n【Web検索情報】\n「{search_query}」について検索を試行しましたが、技術的な問題により最新情報を取得できませんでした。\n"
         
         # If conversation context is provided, modify the messages to include it
-        if conversation_context:
+        if conversation_context or search_context:
             # Add conversation context to the system message or create a new one
             rendered_messages = [message.render() for message in messages]
             
@@ -44,19 +77,32 @@ async def generate_completion_response(
                 if msg["role"] == "system":
                     # Append conversation context to existing system message
                     original_content = msg["content"]
-                    msg["content"] = f"{original_content}\n\n会話履歴:\n{conversation_context}"
+                    context_parts = []
+                    if conversation_context:
+                        context_parts.append(f"会話履歴:\n{conversation_context}")
+                    if search_context:
+                        context_parts.append(search_context)
+                    
+                    msg["content"] = f"{original_content}\n\n" + "\n".join(context_parts)
                     system_message_found = True
                     break
             
-            # If no system message found, create one with conversation context
+            # If no system message found, create one with context
             if not system_message_found:
+                context_parts = []
+                if conversation_context:
+                    context_parts.append(f"会話履歴:\n{conversation_context}")
+                if search_context:
+                    context_parts.append(search_context)
+                
                 context_message = {
                     "role": "system", 
-                    "content": f"会話履歴:\n{conversation_context}"
+                    "content": "\n".join(context_parts)
                 }
                 rendered_messages.insert(0, context_message)
             
-            logger.info(f"Conversation context added: {conversation_context[:200]}...")
+            if conversation_context:
+                logger.info(f"Conversation context added: {conversation_context[:200]}...")
         else:
             rendered_messages = [message.render() for message in messages]
         
@@ -64,7 +110,7 @@ async def generate_completion_response(
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
             messages=rendered_messages,
-            timeout = 10
+            timeout=20  # タイムアウトを10秒から20秒に延長（しかし依然として適度）
         )
         reply = response.choices[0]["message"]["content"].strip()
         logger.info(reply)

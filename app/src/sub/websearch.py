@@ -1,10 +1,12 @@
-import requests
+import aiohttp
+import asyncio
 import json
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from enum import Enum
 from bs4 import BeautifulSoup
 import urllib.parse
+import time
 from sub.utils import logger
 
 
@@ -27,35 +29,49 @@ async def perform_web_search(query: str, max_results: int = 5) -> SearchData:
     and Google custom search as fallback.
     """
     try:
-        logger.info(f"Performing web search for query: {query[:50]}...")
-        
+        start = time.perf_counter()
+        logger.info(f"[websearch] start query='{query[:80]}' max={max_results}")
+
         # First try DuckDuckGo Instant Answer API
         ddg_results = await _search_duckduckgo(query, max_results)
         if ddg_results.status == SearchResult.OK and ddg_results.results:
+            elapsed = (time.perf_counter() - start) * 1000
+            logger.info(f"[websearch] ddg_ok results={len(ddg_results.results)} elapsed_ms={elapsed:.1f}")
             return ddg_results
-        
+
         # Fallback to simple Google search scraping (be respectful with rate limiting)
         google_results = await _search_google_scrape(query, max_results)
-        
+        elapsed_mid = (time.perf_counter() - start) * 1000
+        logger.info(
+            f"[websearch] google_done status={google_results.status.name} results={0 if not google_results.results else len(google_results.results)} elapsed_ms={elapsed_mid:.1f}"
+        )
+
         # If both fail due to network issues, return a helpful message
-        if (ddg_results.status == SearchResult.ERROR and 
-            google_results.status == SearchResult.ERROR and
-            ("No address associated with hostname" in str(ddg_results.error_message) or
-             "No address associated with hostname" in str(google_results.error_message))):
+        if (
+            ddg_results.status == SearchResult.ERROR
+            and google_results.status == SearchResult.ERROR
+            and (
+                "No address associated with hostname" in str(ddg_results.error_message)
+                or "No address associated with hostname" in str(google_results.error_message)
+            )
+        ):
             return SearchData(
                 status=SearchResult.ERROR,
                 results=None,
-                error_message="インターネットアクセスが制限されています。現在ウェブ検索機能は利用できません。"
+                error_message="インターネットアクセスが制限されています。現在ウェブ検索機能は利用できません。",
             )
-        
+
+        elapsed_end = (time.perf_counter() - start) * 1000
+        logger.info(
+            f"[websearch] end final_status={google_results.status.name} total_elapsed_ms={elapsed_end:.1f}"
+        )
         return google_results
-        
+
     except Exception as e:
-        logger.exception(f"Error in web search: {e}")
+        elapsed_err = (time.perf_counter() - start) * 1000
+        logger.exception(f"[websearch] error elapsed_ms={elapsed_err:.1f} error={e}")
         return SearchData(
-            status=SearchResult.ERROR,
-            results=None,
-            error_message=str(e)
+            status=SearchResult.ERROR, results=None, error_message=str(e)
         )
 
 
@@ -72,10 +88,18 @@ async def _search_duckduckgo(query: str, max_results: int) -> SearchData:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        data = response.json()
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                ctype = resp.headers.get('Content-Type','')
+                if 'json' not in ctype.lower():
+                    # Unexpected content-type -> treat as no-results rather than ERROR (will fallback)
+                    return SearchData(
+                        status=SearchResult.ERROR,
+                        results=None,
+                        error_message=f"DuckDuckGo unexpected content-type: {ctype}"
+                    )
+                data = await resp.json(content_type=None)
         results = []
         
         # Extract instant answer if available
@@ -123,7 +147,8 @@ async def _search_google_scrape(query: str, max_results: int) -> SearchData:
     """
     try:
         encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.google.com/search?q={encoded_query}&num={max_results}"
+        # Add localization parameters (Japanese)
+        url = f"https://www.google.com/search?q={encoded_query}&num={max_results}&hl=ja&gl=JP&pws=0"  # pws=0 to reduce personalization
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -134,10 +159,12 @@ async def _search_google_scrape(query: str, max_results: int) -> SearchData:
             'Upgrade-Insecure-Requests': '1',
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                content = await resp.read()
         
-        soup = BeautifulSoup(response.content, 'html.parser')
+        soup = BeautifulSoup(content, 'html.parser')
         results = []
         
         # Find search result containers

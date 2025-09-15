@@ -3,6 +3,8 @@ import os
 import sys
 import discord
 import logging
+import asyncio
+from typing import List, Tuple
 
 # debugpyによるリモートデバッグ有効化
 try:
@@ -38,13 +40,19 @@ from sub.event import (
     channel_chat,
 )
 from sub.history_store import HistoryStore
+from sub.websearch import perform_web_search, format_search_results
+
 
 logging.basicConfig(
     format="[%(asctime)s] [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO
 )
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # メッセージ本文取得
+intents.guilds = True
+intents.members = False
+intents.typing = False
+logger.info(f"[startup] intents configured message_content={intents.message_content} guilds={intents.guilds}")
 
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
@@ -55,18 +63,73 @@ history_store = HistoryStore(max_items=HISTORY_MAX_ITEMS)
 @client.event
 async def on_ready():
     logger.info(f"We have logged in as {client.user}. Invite URL: {BOT_INVITE_URL}")
+    logger.info(f"[diag] connected guild count={len(client.guilds)}")
     completion.READY_BOT_NAME = client.user.name
-    completion.READY_BOT_EXAMPLE_CONVOS = []
-    for c in EXAMPLE_CONVOS:
-        messages = []
-        for m in c.messages:
-            messages.append(m)
-        completion.READY_BOT_EXAMPLE_CONVOS.append(Conversation(messages=messages))
+    completion.READY_BOT_EXAMPLE_CONVOS = [Conversation(messages=[m for m in c.messages]) for c in EXAMPLE_CONVOS]
     await tree.sync()
+    schedule_background_tasks()
+
+async def heartbeat_task():
+    while True:
+        try:
+            latency_ms = client.latency * 1000 if client.latency else None
+            logger.info(f"[health] alive latency={latency_ms:.1f}ms" if latency_ms is not None else "[health] alive latency=n/a")
+        except Exception as e:
+            logger.warning(f"[health] heartbeat error: {e}")
+        await asyncio.sleep(30)
+
+def schedule_background_tasks():
+    # Heartbeat
+    client.loop.create_task(heartbeat_task())
+    # Connectivity quick test
+    async def _quick_test():
+        try:
+            from sub.websearch import perform_web_search
+            result = await perform_web_search("diagnostic connectivity", max_results=1)
+            logger.info(f"[diag] websearch_connectivity status={result.status.name} error={result.error_message}")
+        except Exception as e:
+            logger.warning(f"[diag] websearch_connectivity failed error={e}")
+    client.loop.create_task(_quick_test())
+
+def _is_message_addressed(msg: discord.Message, bot_user: discord.User) -> Tuple[bool, List[str]]:
+    reasons: List[str] = []
+    # direct mention
+    if bot_user in msg.mentions:
+        reasons.append("direct_mention")
+    # role mention
+    try:
+        if msg.guild and hasattr(msg.guild, "me") and msg.role_mentions:
+            bot_roles = {r.id for r in msg.guild.me.roles}
+            for r in msg.role_mentions:
+                if r.id in bot_roles:
+                    reasons.append("role_mention")
+                    break
+    except Exception:
+        pass
+    # name prefix
+    try:
+        content_norm = msg.content.lstrip()
+        bot_name = bot_user.name if bot_user else ""
+        if bot_name and content_norm.lower().startswith(bot_name.lower()):
+            after = content_norm[len(bot_name):]
+            if after == "" or after[:1] in [":", "：", " ", "　", ",", "、"]:
+                reasons.append("name_prefix")
+    except Exception:
+        pass
+    # reply
+    try:
+        if msg.reference and getattr(msg.reference, "resolved", None):
+            ref = msg.reference.resolved
+            if getattr(ref, "author", None) and ref.author.id == bot_user.id:
+                reasons.append("reply")
+    except Exception:
+        pass
+    return (len(reasons) > 0, reasons)
 
 @client.event
 async def on_message(message):
     try:
+        logger.info(f"[event:on_message] author={getattr(message.author,'id',None)} bot={getattr(message.author,'bot',None)} channel={getattr(message.channel,'id',None)} preview='{(message.content[:40] if hasattr(message,'content') else '')}'")
         # block servers not in allow list
         if should_block(guild=message.guild):
             logger.info(f"Blocked guild {message.guild} {message.guild.id}")
@@ -83,13 +146,17 @@ async def on_message(message):
            return
 
         channel = message.channel
-        if not isinstance(channel, discord.Thread):
-            if client.user in message.mentions:
-                logger.info(f"bot mentioned in message from {message.author} {message.author.id}")
-                await channel_chat(message=message,client=client,history_store=history_store)
-        else:
+        if isinstance(channel, discord.Thread):
             logger.info(f"thread message from {message.author} {message.author.id}")
-            await thread_chat(message=message,client=client,history_store=history_store)
+            await thread_chat(message=message, client=client, history_store=history_store)
+            return
+
+        addressed, reasons = _is_message_addressed(message, client.user)
+        logger.info(f"[address_check] addressed={addressed} reasons={','.join(reasons) if reasons else '-'} author={message.author.id} preview='{message.content[:60]}'")
+        if not addressed:
+            return
+        logger.info(f"bot addressed (reasons={reasons}) in message from {message.author} {message.author.id}")
+        await channel_chat(message=message, client=client, history_store=history_store)
         
     except Exception as e:
         logger.exception(e)
@@ -279,5 +346,31 @@ async def websearch_command(int: discord.Interaction, query: str):
             await int.followup.send(
                 f"❌ **エラー**: コマンド実行中にエラーが発生しました: {str(e)}"
             )
+
+@tree.command(name="diag", description="診断情報を表示 (latency / guild / websearch quick check)")
+@discord.app_commands.checks.has_permissions(send_messages=True)
+async def diag_command(int: discord.Interaction):
+    try:
+        await int.response.defer(thinking=True, ephemeral=True)
+        latency_ms = client.latency * 1000 if client.latency else None
+        guild_count = len(client.guilds)
+        # quick websearch test
+        from sub.websearch import perform_web_search
+        test_result = await perform_web_search("diagnostic ping", max_results=1)
+        status = test_result.status.name
+        result_line = "OK" if (test_result.results and len(test_result.results) > 0) else (test_result.error_message or "NO_RESULT")
+        content = (
+            f"Latency: {latency_ms:.1f}ms\n"
+            f"Guilds: {guild_count}\n"
+            f"WebSearch: status={status} detail={result_line[:120]}\n"
+            f"Intents: message_content={intents.message_content} guilds={intents.guilds}"
+        )
+        await int.followup.send(content, ephemeral=True)
+    except Exception as e:
+        logger.exception(e)
+        try:
+            await int.followup.send(f"診断失敗: {e}", ephemeral=True)
+        except Exception:
+            pass
     
 client.run(DISCORD_BOT_TOKEN)
