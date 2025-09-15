@@ -92,6 +92,11 @@ Start chat in the current channel:
 /message "any message"
 ```
 
+Search the web for current information:
+```
+/websearch "search query"
+```
+
 You can also send a message with @BotName "any Message".
 (*Replace "@BotName" with your actual bot name.)
 
