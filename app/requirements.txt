@@ -6,3 +6,5 @@ dacite==1.6.*
 PyNaCl
 Configparser
 debugpy
+requests==2.31.*
+beautifulsoup4==4.12.*

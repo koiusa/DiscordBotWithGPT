@@ -36,6 +36,10 @@ from sub.event import (
     thread_chat,
     channel_chat,
 )
+from sub.websearch import (
+    perform_web_search,
+    format_search_results,
+)
 
 logging.basicConfig(
     format="[%(asctime)s] [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO
@@ -199,5 +203,80 @@ async def message_command(int: discord.Interaction, message: str):
         await int.response.send_message(
             f"Failed to start chat {str(e)}", ephemeral=True
         )
+
+# /websearch query:
+@tree.command(name="websearch", description="Search the web for current information")
+@discord.app_commands.checks.has_permissions(send_messages=True)
+@discord.app_commands.checks.has_permissions(view_channel=True)
+@discord.app_commands.checks.bot_has_permissions(send_messages=True)
+@discord.app_commands.checks.bot_has_permissions(view_channel=True)
+async def websearch_command(int: discord.Interaction, query: str):
+    try:
+        # block servers not in allow list
+        if should_block(guild=int.guild):
+            return
+
+        user = int.user
+        logger.info(f"Web search command by {user} query: {query[:50]}")
+        
+        # Acknowledge the command immediately
+        await int.response.defer()
+        
+        try:
+            # Perform web search
+            search_data = await perform_web_search(query, max_results=5)
+            
+            # Format results for Discord
+            formatted_results = format_search_results(search_data, query)
+            
+            # Split message if too long for Discord (2000 char limit)
+            if len(formatted_results) > 1900:
+                # Split into chunks
+                chunks = []
+                current_chunk = ""
+                lines = formatted_results.split('\n')
+                
+                for line in lines:
+                    if len(current_chunk + line + '\n') > 1900:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                            current_chunk = line + '\n'
+                        else:
+                            # Single line too long, truncate it
+                            chunks.append(line[:1900] + "...")
+                            current_chunk = ""
+                    else:
+                        current_chunk += line + '\n'
+                
+                if current_chunk:
+                    chunks.append(current_chunk)
+                
+                # Send first chunk as follow-up
+                await int.followup.send(chunks[0])
+                
+                # Send remaining chunks
+                for chunk in chunks[1:]:
+                    await int.followup.send(chunk)
+            else:
+                # Send as single message
+                await int.followup.send(formatted_results)
+                
+        except Exception as e:
+            logger.exception(e)
+            await int.followup.send(
+                f"❌ **検索エラー**: ウェブ検索中にエラーが発生しました: {str(e)}"
+            )
+            
+    except Exception as e:
+        logger.exception(e)
+        try:
+            await int.response.send_message(
+                f"❌ **エラー**: コマンド実行中にエラーが発生しました: {str(e)}", ephemeral=True
+            )
+        except:
+            # If response already sent, use followup
+            await int.followup.send(
+                f"❌ **エラー**: コマンド実行中にエラーが発生しました: {str(e)}"
+            )
     
 client.run(DISCORD_BOT_TOKEN)
