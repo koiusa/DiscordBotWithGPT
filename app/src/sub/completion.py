@@ -1,4 +1,4 @@
-import openai
+import openai  # kept for InvalidRequestError reference
 import asyncio
 import time
 from dataclasses import dataclass
@@ -29,51 +29,14 @@ from sub.constants import (
 from sub.search_decision import should_perform_web_search, SearchDecisionType
 from sub.search_context import build_search_context
 from datetime import datetime, timezone
+from sub.openai_wrapper import chat as openai_chat
 
 import discord
 
 READY_BOT_NAME = BOT_NAME
 READY_BOT_EXAMPLE_CONVOS = EXAMPLE_CONVOS
 
-# Limit concurrent OpenAI calls to avoid flooding threads
-_OPENAI_CONCURRENCY = 3
-_openai_semaphore = asyncio.Semaphore(_OPENAI_CONCURRENCY)
-
-async def _call_openai_async(messages_rendered: List[dict]) -> tuple[dict, float, float]:
-    """Run OpenAI ChatCompletion in a worker thread to avoid blocking event loop.
-    Returns raw response dict. Raises exceptions unchanged.
-    Adds timing logs and semaphore control.
-    """
-    start_wait = time.perf_counter()
-    async with _openai_semaphore:
-        queue_wait_ms = (time.perf_counter() - start_wait) * 1000
-        openai.api_key = OPENAI_API_KEY
-        max_attempts = 3
-        backoff_base = 0.8
-        last_exc = None
-        for attempt in range(1, max_attempts + 1):
-            def _sync_invoke():
-                invoke_start = time.perf_counter()
-                resp = openai.ChatCompletion.create(
-                    model=OPENAI_MODEL,
-                    messages=messages_rendered,
-                    timeout=20,
-                )
-                invoke_ms_local = (time.perf_counter() - invoke_start) * 1000
-                return resp, invoke_ms_local
-            try:
-                resp, invoke_ms = await asyncio.to_thread(_sync_invoke)
-                return resp, queue_wait_ms, invoke_ms
-            except Exception as e:
-                last_exc = e
-                retriable = any(k in str(e).lower() for k in ["rate limit", "timeout", "temporar", "overloaded", "503"])  # noqa
-                if attempt == max_attempts or not retriable:
-                    raise
-                sleep_for = backoff_base * (2 ** (attempt - 1))
-                jitter = 0.05 * sleep_for
-                await asyncio.sleep(sleep_for + jitter)
-        # Should not reach here
-        raise last_exc  # type: ignore
+# _call_openai_async removed: replaced by openai_wrapper.chat
 
 class CompletionResult(Enum):
     OK = 0
@@ -102,27 +65,19 @@ async def generate_completion_response(
                     approx_prompt_tokens > SUMMARY_TRIGGER_PROMPT_TOKENS
                     and len(conversation_context) < SUMMARY_MAX_SOURCE_CHARS
                 ):
-                    # 要約用プロンプト構築
                     system_sum = {
                         "role": "system",
                         "content": "以下は過去会話の生ログです。重要な事実・ユーザーの意図・未回答の要求・決定事項を日本語で簡潔に列挙し、不要な挨拶や雑談は除外し200～300文字程度に要約してください。出力は箇条書き風で。",
                     }
-                    user_sum = {
-                        "role": "user",
-                        "content": conversation_context,
-                    }
-                    openai.api_key = OPENAI_API_KEY
-                    def _sync_sum():
-                        r = openai.ChatCompletion.create(
-                            model=SUMMARY_MODEL,
-                            messages=[system_sum, user_sum],
-                            timeout=15,
-                        )
-                        return r
+                    user_sum = {"role": "user", "content": conversation_context}
                     try:
-                        r = await asyncio.to_thread(_sync_sum)
-                        summarized = r.choices[0]["message"]["content"].strip()
-                        # 期待より長すぎる場合はさらに先頭/末尾調整
+                        sum_resp, sum_metrics = await openai_chat(
+                            [system_sum, user_sum],
+                            model=SUMMARY_MODEL,
+                            timeout=15,
+                            purpose="summary",
+                        )
+                        summarized = sum_resp.choices[0]["message"]["content"].strip()
                         target_chars = int(len(conversation_context) * SUMMARY_TARGET_REDUCTION_RATIO)
                         if len(summarized) > target_chars:
                             summarized = summarized[: target_chars - 15] + "..."
@@ -148,14 +103,16 @@ async def generate_completion_response(
             search_executed=search_executed,
         )
         rendered_messages = augment_result.messages
-        response, queue_wait_ms, invoke_ms = await _call_openai_async(rendered_messages)
+        response, metrics = await openai_chat(rendered_messages, model=OPENAI_MODEL, purpose="completion")
+        queue_wait_ms = metrics.get('queue_wait_ms', 0.0)
+        invoke_ms = metrics.get('invoke_ms', 0.0)
+        attempt_used = metrics.get('attempt', 1)
         reply = response.choices[0]["message"]["content"].strip()
         reply = sanitize_reply(reply, search_executed)
         usage = getattr(response, "usage", {}) or {}
         prompt_toks = usage.get("prompt_tokens", "?")
         comp_toks = usage.get("completion_tokens", "?")
         total_toks = usage.get("total_tokens", "?")
-        # Cost (USD) estimation
         cost_prompt = 0.0
         cost_completion = 0.0
         try:
@@ -167,24 +124,29 @@ async def generate_completion_response(
             pass
         total_cost = cost_prompt + cost_completion
         logger.info(
-            "openai_metrics decision=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s "
-            "queue_wait_ms=%.1f invoke_ms=%.1f messages=%d reply_chars=%d cost_prompt=%.6f cost_completion=%.6f cost_total=%.6f summary_applied=%s",
+            "openai_metrics decision=%s decision_score=%s decision_reasons=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s "
+            "queue_wait_ms=%.1f invoke_ms=%.1f attempt=%d messages=%d reply_chars=%d cost_prompt=%.6f cost_completion=%.6f cost_total=%.6f summary_applied=%s "
+            "augment_truncated=%s augment_sections=%s search_executed=%s",
             decision.decision.name,
+            getattr(decision, 'score', '?'),
+            getattr(decision, 'reasons', []),
             prompt_toks,
             comp_toks,
             total_toks,
             queue_wait_ms,
             invoke_ms,
+            attempt_used,
             len(rendered_messages),
             len(reply),
             cost_prompt,
             cost_completion,
             total_cost,
             summary_applied,
+            augment_result.meta.conversation_truncated,
+            ','.join(augment_result.meta.sections_applied),
+            search_executed,
         )
-        return CompletionData(
-            status=CompletionResult.OK, reply_text=reply, status_text=None
-        )
+        return CompletionData(status=CompletionResult.OK, reply_text=reply, status_text=None)
     except openai.error.InvalidRequestError as e:
         if "This model's maximum context length" in e.user_message:
             return CompletionData(

@@ -114,3 +114,48 @@ Web Search
 
 ### Reference
  - [gpt-discord-bot](https://github.com/openai/gpt-discord-bot)
+
+---
+
+### 追加機能 (Refactor 後)
+- Web検索 (DuckDuckGo + Google Fallback) + 検索要否スコアリング
+- 会話要約 (しきい値超過時に自動圧縮 `SUMMARY_*` 環境変数で調整)
+- OpenAI 呼び出し共通ラッパ (再試行 / セマフォ / 計測)
+- 検索結果キャッシュ (LRU + TTL / `WEBSEARCH_CACHE_*`)
+- 免責(リアルタイム不可)自動除去・ガイドライン挿入
+- メッセージ拡張セクション差分更新 (会話/検索/ガイドライン)
+- トークン & コストロギング、要約適用有無、検索実行/キャッシュヒット記録
+
+### 主要ログ例
+```
+openai_metrics decision=QUERY decision_score=3 decision_reasons=['pattern:.*最新', 'factual_keyword'] \
+  prompt_tokens=1234 completion_tokens=456 total_tokens=1690 queue_wait_ms=12.3 invoke_ms=842.1 attempt=1 \
+  messages=9 reply_chars=1023 cost_prompt=0.006170 cost_completion=0.006840 cost_total=0.013010 \
+  summary_applied=True augment_truncated=False augment_sections=### <CONVERSATION_CONTEXT>,### <SEARCH_CONTEXT>,### <GUIDELINE> search_executed=True
+```
+
+### 追加環境変数
+| 変数 | 説明 | 例 | 既定 |
+| ---- | ---- | ---- | ---- |
+| `SUMMARY_TRIGGER_PROMPT_TOKENS` | 概算プロンプトトークン数しきい値 | 2800 | 2800 |
+| `SUMMARY_TARGET_REDUCTION_RATIO` | 要約後目標長 (元の何倍) | 0.5 | 0.5 |
+| `SUMMARY_MAX_SOURCE_CHARS` | 要約対象の最大文字数 | 8000 | 8000 |
+| `SUMMARY_MODEL` | 要約モデル (未指定ならメイン) | gpt-4o-mini | main model |
+| `WEBSEARCH_CACHE_TTL` | 検索キャッシュ TTL 秒 | 300 | 180 |
+| `WEBSEARCH_CACHE_MAX` | キャッシュ最大件数 | 256 | 128 |
+
+`.env.example` を参照して `.env` を作成してください。
+
+### セキュリティ注意
+リポジトリに本物の API キーをコミットしないでください。万一履歴に含めた場合は以下を実施:
+1. OpenAI / Discord でキー再発行
+2. 旧キー無効化
+3. `.env` を更新 (コミットしない)
+4. 公開済みコミットからキー文字列を含むか再確認 ( `git log -S` など)
+
+`.gitignore` に `.env` が含まれていることを確認:
+```
+echo ".env" >> .gitignore
+```
+既に push 済みのキーは public から必ず撤収 (ローテ) してください。
+

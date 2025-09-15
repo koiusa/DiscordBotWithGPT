@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sub.search_decision import SearchDecision, SearchDecisionType
 from sub.base import Message
 from sub.websearch import perform_web_search
+from sub.websearch_cache import cache
 from sub.utils import logger
 
 # Tunable limits (could be externalized later)
@@ -27,11 +28,21 @@ async def build_search_context(decision: SearchDecision, messages: List[Message]
         return "", False
     search_query = decision.query
     logger.info(f"Web search triggered for query: {search_query}")
+    cache_hit = False
+    search_data = cache.get(search_query)
+    if search_data:
+        cache_hit = True
+    else:
+        try:
+            search_data = await perform_web_search(search_query, max_results=_MAX_ITEMS)
+            cache.set(search_query, search_data)
+        except Exception as e:
+            logger.error(f"Web search failed before context build: {e}")
+            search_data = None
+    logger.info(
+        f"Web search raw result: cache_hit={cache_hit} status={getattr(search_data,'status',None)} error={getattr(search_data,'error_message',None)} results={getattr(search_data,'results',None)}"
+    )
     try:
-        search_data = await perform_web_search(search_query, max_results=_MAX_ITEMS)
-        logger.info(
-            f"Web search raw result: status={search_data.status}, error={search_data.error_message}, results={search_data.results}"
-        )
         if search_data.status.name == "OK" and search_data.results:
             ts = datetime.now(timezone.utc).astimezone()
             ts_str = ts.strftime("%Y-%m-%d %H:%M:%S %Z")
