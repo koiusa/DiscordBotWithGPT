@@ -18,8 +18,11 @@ from sub.constants import (
     MAX_CHANNEL_MESSAGES,
     SECONDS_DELAY_RECEIVING_MSG,
 )
+from sub.history_store import HistoryEntry, HistoryStore
+from sub.format_conversation import create_conversation_context
+from datetime import datetime
 
-async def thread_chat(message, client: discord.Client) -> bool:
+async def thread_chat(message, client: discord.Client, history_store: HistoryStore) -> bool:
         logger.info(f"thread_chat called")
         channel = message.channel     
         # ignore threads not created by the bot
@@ -56,12 +59,34 @@ async def thread_chat(message, client: discord.Client) -> bool:
             f"Thread message to process - {message.author}: {message.content[:50]} - {thread.name} {thread.jump_url}"
         )
 
+        # Add current message to history store (source: "text")
+        channel_id = str(message.channel.id)
+        history_entry = HistoryEntry(
+            user_id=str(message.author.id),
+            username=message.author.display_name or message.author.name,
+            content=message.content,
+            source="text",
+            timestamp=datetime.now()
+        )
+        history_store.add_message(channel_id, history_entry)
+
+        # Get conversation history for context
+        history_entries = history_store.get_history(channel_id)
+        
+        # Create conversation context with user identification
+        conversation_context = create_conversation_context(
+            history_entries[:-1],  # Exclude current message as it's already included
+            message.content,
+            str(message.author.id),
+            message.author.display_name or message.author.name
+        )
+
         channel_messages = await get_channel_messages(message, MAX_THREAD_MESSAGES)
 
         # generate the response
         async with thread.typing():
             response_data = await generate_completion_response(
-                user=message.author, messages=channel_messages 
+                user=message.author, messages=channel_messages, conversation_context=conversation_context
             )
 
         if is_last_message_stale(
@@ -79,7 +104,7 @@ async def thread_chat(message, client: discord.Client) -> bool:
         
         return True
 
-async def channel_chat(message, client: discord.Client) -> bool:
+async def channel_chat(message, client: discord.Client, history_store: HistoryStore) -> bool:
     logger.info(f"channel_chat called")
     channel = message.channel 
     # wait a bit in case user has more messages
@@ -96,13 +121,35 @@ async def channel_chat(message, client: discord.Client) -> bool:
     logger.info(
             f"Channel message to process - {message.author}: {message.content[:50]} - {channel.name} {channel.jump_url}"
     )
+    
+    # Add current message to history store (source: "text")
+    channel_id = str(message.channel.id)
+    history_entry = HistoryEntry(
+        user_id=str(message.author.id),
+        username=message.author.display_name or message.author.name,
+        content=message.content,
+        source="text",
+        timestamp=datetime.now()
+    )
+    history_store.add_message(channel_id, history_entry)
+
+    # Get conversation history for context
+    history_entries = history_store.get_history(channel_id)
+    
+    # Create conversation context with user identification
+    conversation_context = create_conversation_context(
+        history_entries[:-1],  # Exclude current message as it's already included
+        message.content,
+        str(message.author.id),
+        message.author.display_name or message.author.name
+    )
      
     channel_messages = await get_channel_messages(message, MAX_CHANNEL_MESSAGES)
      
      # generate the response
     async with channel.typing():
             response_data = await generate_completion_response(
-                user=message.author, messages=channel_messages
+                user=message.author, messages=channel_messages, conversation_context=conversation_context
                         )
      
     # send response

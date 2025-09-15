@@ -20,6 +20,7 @@ from sub.constants import (
     DISCORD_BOT_TOKEN,
     EXAMPLE_CONVOS,
     ACTIVATE_THREAD_PREFX,
+    HISTORY_MAX_ITEMS,
 )
 from sub.utils import (
     logger,
@@ -36,6 +37,7 @@ from sub.event import (
     thread_chat,
     channel_chat,
 )
+from sub.history_store import HistoryStore
 
 logging.basicConfig(
     format="[%(asctime)s] [%(filename)s:%(lineno)d] %(message)s", level=logging.INFO
@@ -46,6 +48,9 @@ intents.message_content = True
 
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
+
+# Initialize global history store
+history_store = HistoryStore(max_items=HISTORY_MAX_ITEMS)
 
 @client.event
 async def on_ready():
@@ -81,10 +86,10 @@ async def on_message(message):
         if not isinstance(channel, discord.Thread):
             if client.user in message.mentions:
                 logger.info(f"bot mentioned in message from {message.author} {message.author.id}")
-                await channel_chat(message=message,client=client)
+                await channel_chat(message=message,client=client,history_store=history_store)
         else:
             logger.info(f"thread message from {message.author} {message.author.id}")
-            await thread_chat(message=message,client=client)
+            await thread_chat(message=message,client=client,history_store=history_store)
         
     except Exception as e:
         logger.exception(e)
