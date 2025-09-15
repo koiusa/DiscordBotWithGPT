@@ -41,6 +41,7 @@ from sub.event import (
 )
 from sub.history_store import HistoryStore
 from sub.websearch import perform_web_search, format_search_results
+from sub.dedup import GLOBAL_MESSAGE_DEDUP
 
 
 logging.basicConfig(
@@ -130,6 +131,13 @@ def _is_message_addressed(msg: discord.Message, bot_user: discord.User) -> Tuple
 async def on_message(message):
     try:
         logger.info(f"[event:on_message] author={getattr(message.author,'id',None)} bot={getattr(message.author,'bot',None)} channel={getattr(message.channel,'id',None)} preview='{(message.content[:40] if hasattr(message,'content') else '')}'")
+        # Duplicate suppression (e.g., Discord client resend / network glitch)
+        mid = getattr(message, 'id', None)
+        if mid is not None:
+            if GLOBAL_MESSAGE_DEDUP.seen(mid):
+                logger.info(f"[dedup] duplicate_message_skip id={mid}")
+                return
+            GLOBAL_MESSAGE_DEDUP.mark(mid)
         # block servers not in allow list
         if should_block(guild=message.guild):
             logger.info(f"Blocked guild {message.guild} {message.guild.id}")

@@ -24,7 +24,7 @@ READY_BOT_EXAMPLE_CONVOS = EXAMPLE_CONVOS
 _OPENAI_CONCURRENCY = 3
 _openai_semaphore = asyncio.Semaphore(_OPENAI_CONCURRENCY)
 
-async def _call_openai_async(messages_rendered: List[dict]) -> dict:
+async def _call_openai_async(messages_rendered: List[dict]) -> tuple[dict, float, float]:
     """Run OpenAI ChatCompletion in a worker thread to avoid blocking event loop.
     Returns raw response dict. Raises exceptions unchanged.
     Adds timing logs and semaphore control.
@@ -32,7 +32,6 @@ async def _call_openai_async(messages_rendered: List[dict]) -> dict:
     start_wait = time.perf_counter()
     async with _openai_semaphore:
         queue_wait_ms = (time.perf_counter() - start_wait) * 1000
-        logger.info(f"openai_queue_wait_ms={queue_wait_ms:.1f}")
         openai.api_key = OPENAI_API_KEY
         def _sync_invoke():
             invoke_start = time.perf_counter()
@@ -44,8 +43,7 @@ async def _call_openai_async(messages_rendered: List[dict]) -> dict:
             invoke_ms = (time.perf_counter() - invoke_start) * 1000
             return resp, invoke_ms
         resp, invoke_ms = await asyncio.to_thread(_sync_invoke)
-        logger.info(f"openai_invoke_ms={invoke_ms:.1f} total_tokens={getattr(resp, 'usage', {}).get('total_tokens', '?')}")
-        return resp
+        return resp, queue_wait_ms, invoke_ms
 
 class CompletionResult(Enum):
     OK = 0
@@ -139,10 +137,25 @@ async def generate_completion_response(
         else:
             rendered_messages = [message.render() for message in messages]
         
-        response = await _call_openai_async(rendered_messages)
+        response, queue_wait_ms, invoke_ms = await _call_openai_async(rendered_messages)
         reply = response.choices[0]["message"]["content"].strip()
-        logger.info(reply)
-        logger.info(response.usage)
+        usage = getattr(response, 'usage', {}) or {}
+        prompt_toks = usage.get('prompt_tokens', '?')
+        comp_toks = usage.get('completion_tokens', '?')
+        total_toks = usage.get('total_tokens', '?')
+        # 構造化ワンラインログ
+        logger.info(
+            "openai_metrics decision=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s "
+            "queue_wait_ms=%.1f invoke_ms=%.1f messages=%d reply_chars=%d",
+            decision.decision.name,
+            prompt_toks,
+            comp_toks,
+            total_toks,
+            queue_wait_ms,
+            invoke_ms,
+            len(rendered_messages),
+            len(reply),
+        )
         return CompletionData(
             status=CompletionResult.OK, reply_text=reply, status_text=None
         )
