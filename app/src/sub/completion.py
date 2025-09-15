@@ -20,6 +20,12 @@ from sub.utils import split_into_shorter_messages, close_thread, logger
 from sub.websearch import perform_web_search, format_search_results
 from sub.disclaimer import sanitize_reply
 from sub.message_augment import augment_messages
+from sub.constants import (
+    SUMMARY_TRIGGER_PROMPT_TOKENS,
+    SUMMARY_TARGET_REDUCTION_RATIO,
+    SUMMARY_MAX_SOURCE_CHARS,
+    SUMMARY_MODEL,
+)
 from sub.search_decision import should_perform_web_search, SearchDecisionType
 from sub.search_context import build_search_context
 from datetime import datetime, timezone
@@ -87,6 +93,45 @@ async def generate_completion_response(
 ) -> CompletionData:
     try:
         logger.info(messages)
+        # 1. 会話履歴要約検討 (簡易トークン概算 = 4 chars / token 近似)
+        summary_applied = False
+        if conversation_context:
+            try:
+                approx_prompt_tokens = len(conversation_context) / 4
+                if (
+                    approx_prompt_tokens > SUMMARY_TRIGGER_PROMPT_TOKENS
+                    and len(conversation_context) < SUMMARY_MAX_SOURCE_CHARS
+                ):
+                    # 要約用プロンプト構築
+                    system_sum = {
+                        "role": "system",
+                        "content": "以下は過去会話の生ログです。重要な事実・ユーザーの意図・未回答の要求・決定事項を日本語で簡潔に列挙し、不要な挨拶や雑談は除外し200～300文字程度に要約してください。出力は箇条書き風で。",
+                    }
+                    user_sum = {
+                        "role": "user",
+                        "content": conversation_context,
+                    }
+                    openai.api_key = OPENAI_API_KEY
+                    def _sync_sum():
+                        r = openai.ChatCompletion.create(
+                            model=SUMMARY_MODEL,
+                            messages=[system_sum, user_sum],
+                            timeout=15,
+                        )
+                        return r
+                    try:
+                        r = await asyncio.to_thread(_sync_sum)
+                        summarized = r.choices[0]["message"]["content"].strip()
+                        # 期待より長すぎる場合はさらに先頭/末尾調整
+                        target_chars = int(len(conversation_context) * SUMMARY_TARGET_REDUCTION_RATIO)
+                        if len(summarized) > target_chars:
+                            summarized = summarized[: target_chars - 15] + "..."
+                        conversation_context = summarized
+                        summary_applied = True
+                    except Exception as se:
+                        logger.warning(f"summary_failed err={se}")
+            except Exception:
+                pass
         decision = should_perform_web_search(messages)
         # datetime direct answer short-circuit
         if decision.decision == SearchDecisionType.DATETIME_ANSWER:
@@ -123,7 +168,7 @@ async def generate_completion_response(
         total_cost = cost_prompt + cost_completion
         logger.info(
             "openai_metrics decision=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s "
-            "queue_wait_ms=%.1f invoke_ms=%.1f messages=%d reply_chars=%d cost_prompt=%.6f cost_completion=%.6f cost_total=%.6f",
+            "queue_wait_ms=%.1f invoke_ms=%.1f messages=%d reply_chars=%d cost_prompt=%.6f cost_completion=%.6f cost_total=%.6f summary_applied=%s",
             decision.decision.name,
             prompt_toks,
             comp_toks,
@@ -135,6 +180,7 @@ async def generate_completion_response(
             cost_prompt,
             cost_completion,
             total_cost,
+            summary_applied,
         )
         return CompletionData(
             status=CompletionResult.OK, reply_text=reply, status_text=None

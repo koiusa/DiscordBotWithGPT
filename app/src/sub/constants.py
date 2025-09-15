@@ -19,6 +19,12 @@ OPENAI_MODEL = CONFIG.model
 OPENAI_PROMPT_TOKEN_COST = float(os.environ.get("OPENAI_PROMPT_TOKEN_COST", "0.0"))  # USD per 1k tokens
 OPENAI_COMPLETION_TOKEN_COST = float(os.environ.get("OPENAI_COMPLETION_TOKEN_COST", "0.0"))  # USD per 1k tokens
 
+# Conversation summarization thresholds (heuristic)
+SUMMARY_TRIGGER_PROMPT_TOKENS = int(os.environ.get("SUMMARY_TRIGGER_PROMPT_TOKENS", "2800"))
+SUMMARY_TARGET_REDUCTION_RATIO = float(os.environ.get("SUMMARY_TARGET_REDUCTION_RATIO", "0.5"))  # reduce to 50% of chars heuristically
+SUMMARY_MAX_SOURCE_CHARS = int(os.environ.get("SUMMARY_MAX_SOURCE_CHARS", "8000"))  # upper bound to attempt summarization
+SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", OPENAI_MODEL)
+
 DISCORD_BOT_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 DISCORD_CLIENT_ID = os.environ["DISCORD_CLIENT_ID"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
