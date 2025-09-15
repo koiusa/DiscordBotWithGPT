@@ -1,4 +1,6 @@
 import openai
+import asyncio
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List
@@ -11,12 +13,39 @@ from sub.constants import (
 from sub.base import Message
 from sub.utils import split_into_shorter_messages, close_thread, logger
 from sub.websearch import perform_web_search, format_search_results
-from sub.search_decision import should_perform_web_search
+from sub.search_decision import should_perform_web_search, SearchDecisionType
 
 import discord
 
 READY_BOT_NAME = BOT_NAME
 READY_BOT_EXAMPLE_CONVOS = EXAMPLE_CONVOS
+
+# Limit concurrent OpenAI calls to avoid flooding threads
+_OPENAI_CONCURRENCY = 3
+_openai_semaphore = asyncio.Semaphore(_OPENAI_CONCURRENCY)
+
+async def _call_openai_async(messages_rendered: List[dict]) -> dict:
+    """Run OpenAI ChatCompletion in a worker thread to avoid blocking event loop.
+    Returns raw response dict. Raises exceptions unchanged.
+    Adds timing logs and semaphore control.
+    """
+    start_wait = time.perf_counter()
+    async with _openai_semaphore:
+        queue_wait_ms = (time.perf_counter() - start_wait) * 1000
+        logger.info(f"openai_queue_wait_ms={queue_wait_ms:.1f}")
+        openai.api_key = OPENAI_API_KEY
+        def _sync_invoke():
+            invoke_start = time.perf_counter()
+            resp = openai.ChatCompletion.create(
+                model=OPENAI_MODEL,
+                messages=messages_rendered,
+                timeout=20,
+            )
+            invoke_ms = (time.perf_counter() - invoke_start) * 1000
+            return resp, invoke_ms
+        resp, invoke_ms = await asyncio.to_thread(_sync_invoke)
+        logger.info(f"openai_invoke_ms={invoke_ms:.1f} total_tokens={getattr(resp, 'usage', {}).get('total_tokens', '?')}")
+        return resp
 
 class CompletionResult(Enum):
     OK = 0
@@ -39,17 +68,23 @@ async def generate_completion_response(
 
         # 株価等の専用ロジックは排除し、汎用フローのみで処理
         
-        # Web検索が必要かどうか判定
-        search_query = should_perform_web_search(messages)
+        # 検索要否 + 日時直接応答判定
+        decision = should_perform_web_search(messages)
         search_context = ""
-        
-        if search_query:
+
+        # 日時直接応答の場合は OpenAI 呼び出しをスキップしそのまま返す
+        if decision.decision == SearchDecisionType.DATETIME_ANSWER:
+            reply = decision.direct_answer or ""
+            return CompletionData(status=CompletionResult.OK, reply_text=reply, status_text=None)
+
+        # 通常検索クエリの場合のみ検索実行
+        if decision.decision == SearchDecisionType.QUERY and decision.query:
+            search_query = decision.query
             logger.info(f"Web search triggered for query: {search_query}")
             try:
                 search_data = await perform_web_search(search_query, max_results=3)
                 logger.info(f"Web search raw result: status={search_data.status}, error={search_data.error_message}, results={search_data.results}")
                 if search_data.status.name == "OK" and search_data.results:
-                    # 検索結果をコンテキストとして整理
                     search_context = "\n\n【Web検索結果】\n"
                     for i, result in enumerate(search_data.results[:3], 1):
                         title = result.get('title', 'タイトルなし')
@@ -58,12 +93,10 @@ async def generate_completion_response(
                         search_context += f"{i}. {title}\n{snippet}\n{url}\n\n"
                     logger.info(f"Search context added: {len(search_context)} characters")
                 else:
-                    # 検索結果が無い場合も、検索を試行したことをAIに伝える
                     search_context = f"\n\n【Web検索情報】\n「{search_query}」について検索を試行しましたが、具体的な最新情報は取得できませんでした。一般的な知識で回答してください。\n"
                     logger.info("Web search returned no results, providing fallback context")
             except Exception as e:
                 logger.error(f"Web search failed: {e}")
-                # エラー時も検索を試行したことを伝える
                 search_context = f"\n\n【Web検索情報】\n「{search_query}」について検索を試行しましたが、技術的な問題により最新情報を取得できませんでした。\n"
         
         # If conversation context is provided, modify the messages to include it
@@ -106,12 +139,7 @@ async def generate_completion_response(
         else:
             rendered_messages = [message.render() for message in messages]
         
-        openai.api_key = OPENAI_API_KEY
-        response = openai.ChatCompletion.create(
-            model=OPENAI_MODEL,
-            messages=rendered_messages,
-            timeout=20  # タイムアウトを10秒から20秒に延長（しかし依然として適度）
-        )
+        response = await _call_openai_async(rendered_messages)
         reply = response.choices[0]["message"]["content"].strip()
         logger.info(reply)
         logger.info(response.usage)

@@ -17,6 +17,8 @@ Internal helpers kept private by underscore naming.
 """
 from __future__ import annotations
 from typing import List, Optional, Tuple
+from enum import Enum
+from dataclasses import dataclass
 import re
 from sub.base import Message
 from sub.utils import logger
@@ -127,22 +129,48 @@ def _optimize_query(query: str, enrich_keywords: List[str]) -> str:
         logger.info(f"query_optimized before='{original}' after='{q}'")
     return q
 
-def should_perform_web_search(messages: List[Message], config: SearchConfig = DEFAULT_SEARCH_CONFIG) -> Optional[str]:
+class SearchDecisionType(Enum):
+    NONE = "none"
+    QUERY = "query"
+    DATETIME_ANSWER = "datetime_answer"
+
+@dataclass
+class SearchDecision:
+    decision: SearchDecisionType
+    query: Optional[str] = None
+    direct_answer: Optional[str] = None
+    score: int = 0
+    reasons: List[str] = None
+
+def should_perform_web_search(messages: List[Message], config: SearchConfig = DEFAULT_SEARCH_CONFIG) -> SearchDecision:
     user_messages = [m for m in messages if m.role == "user"]
     if not user_messages:
-        return None
+        return SearchDecision(SearchDecisionType.NONE, score=0, reasons=[])
+
     latest_raw = user_messages[-1].content
     latest_lower = latest_raw.lower()
 
     dt_answer = _detect_datetime_direct_answer(latest_lower)
     if dt_answer:
-        return dt_answer
+        logger.info("search_decision type=DATETIME_ANSWER reasons=['datetime_pattern']")
+        return SearchDecision(
+            decision=SearchDecisionType.DATETIME_ANSWER,
+            direct_answer=dt_answer,
+            score=0,
+            reasons=["datetime_pattern"],
+        )
 
     score, reasons = _evaluate_search_need(latest_lower, config)
     if score < config.min_score:
-        return None
+        logger.info(f"search_decision type=NONE score={score} reasons={reasons}")
+        return SearchDecision(SearchDecisionType.NONE, score=score, reasons=reasons)
 
     query = _clean_search_query(latest_raw)
     query = _optimize_query(query, config.enrich_keywords)
-    logger.info(f"search_decision score={score} reasons={reasons} query='{query}'")
-    return query[:100]
+    logger.info(f"search_decision type=QUERY score={score} reasons={reasons} query='{query}'")
+    return SearchDecision(
+        decision=SearchDecisionType.QUERY,
+        query=query[:100],
+        score=score,
+        reasons=reasons,
+    )
