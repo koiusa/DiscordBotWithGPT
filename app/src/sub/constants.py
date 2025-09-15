@@ -46,3 +46,6 @@ MAX_CHARS_PER_REPLY_MSG = (
 SECONDS_DELAY_RECEIVING_MSG = (
     3  # give a delay for the bot to respond so it can catch multiple messages
 )
+
+# History management for user identification
+HISTORY_MAX_ITEMS = int(os.environ.get("HISTORY_MAX_ITEMS", "30"))

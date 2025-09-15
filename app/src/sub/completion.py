@@ -28,14 +28,42 @@ class CompletionData:
     status_text: Optional[str]
 
 async def generate_completion_response(
-    messages: List[Message], user: str
+    messages: List[Message], user: str, conversation_context: str = None
 ) -> CompletionData:
     try:
         logger.info(messages)
+        
+        # If conversation context is provided, modify the messages to include it
+        if conversation_context:
+            # Add conversation context to the system message or create a new one
+            rendered_messages = [message.render() for message in messages]
+            
+            # Find system message or create one
+            system_message_found = False
+            for msg in rendered_messages:
+                if msg["role"] == "system":
+                    # Append conversation context to existing system message
+                    original_content = msg["content"]
+                    msg["content"] = f"{original_content}\n\n会話履歴:\n{conversation_context}"
+                    system_message_found = True
+                    break
+            
+            # If no system message found, create one with conversation context
+            if not system_message_found:
+                context_message = {
+                    "role": "system", 
+                    "content": f"会話履歴:\n{conversation_context}"
+                }
+                rendered_messages.insert(0, context_message)
+            
+            logger.info(f"Conversation context added: {conversation_context[:200]}...")
+        else:
+            rendered_messages = [message.render() for message in messages]
+        
         openai.api_key = OPENAI_API_KEY
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
-            messages=[message.render() for message in messages],
+            messages=rendered_messages,
             timeout = 10
         )
         reply = response.choices[0]["message"]["content"].strip()
