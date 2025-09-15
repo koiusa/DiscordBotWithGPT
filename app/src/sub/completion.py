@@ -18,6 +18,7 @@ from sub.constants import (
 from sub.base import Message
 from sub.utils import split_into_shorter_messages, close_thread, logger
 from sub.websearch import perform_web_search, format_search_results
+from sub.disclaimer import sanitize_reply
 from sub.search_decision import should_perform_web_search, SearchDecisionType
 from datetime import datetime, timezone
 
@@ -78,14 +79,6 @@ class CompletionData:
     reply_text: Optional[str]
     status_text: Optional[str]
 
-
-def _build_disclaimer_patterns():
-    return [
-        r"現在、?私はインターネットからリアルタイムで最新ニュースを取得できません",
-        r"(最新|リアルタイム).{0,10}アクセス(できません|できない)",
-        r"(私|このモデル|わたし)の(知識|学習|トレーニング).{0,20}(202\d|20\d\d)年(まで|時点)",
-        r"リアルタイム.{0,10}提供(できません|できない)",
-    ]
 
 async def _maybe_execute_search(decision, messages: List[Message]):
     """Execute web search if decision indicates so. Returns (search_context, search_executed)."""
@@ -166,24 +159,6 @@ def _augment_messages(messages: List[Message], conversation_context: str, search
         logger.info(f"Conversation context added: {conversation_context[:200]}...")
     return rendered_messages
 
-def _sanitize_reply(reply: str, search_executed: bool) -> str:
-    if not (search_executed and reply):
-        return reply
-    import re as _re
-    patterns = _build_disclaimer_patterns()
-    cleaned = reply
-    removed_any = False
-    for pat in patterns:
-        new_cleaned = _re.sub(pat, "", cleaned, flags=_re.IGNORECASE)
-        if new_cleaned != cleaned:
-            removed_any = True
-            cleaned = new_cleaned
-    cleaned = _re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    if removed_any:
-        logger.info("reply_disclaimer_removed=1")
-        return cleaned if cleaned else "(検索結果を踏まえて最新と思われる要点を上に示しました。必要なら追加で質問してください。)"
-    return cleaned
-
 async def generate_completion_response(
     messages: List[Message], user: str, conversation_context: str = None
 ) -> CompletionData:
@@ -203,7 +178,7 @@ async def generate_completion_response(
         )
         response, queue_wait_ms, invoke_ms = await _call_openai_async(rendered_messages)
         reply = response.choices[0]["message"]["content"].strip()
-        reply = _sanitize_reply(reply, search_executed)
+        reply = sanitize_reply(reply, search_executed)
         usage = getattr(response, "usage", {}) or {}
         prompt_toks = usage.get("prompt_tokens", "?")
         comp_toks = usage.get("completion_tokens", "?")
