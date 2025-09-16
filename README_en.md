@@ -131,6 +131,29 @@ If `RESPOND_WITHOUT_MENTION=1`, passive channel messages are rate limited per us
 |   | DISCLAIMER_ENABLE_ENGLISH | Remove English disclaimers | 1 |
 |   | DISCLAIMER_EXTRA_PATTERNS | Extra regex removal | (empty) |
 
+### Timeout / Fallback Configuration
+| Req | Name | Description | Default |
+| --- | ---- | ----------- | ------- |
+|   | OPENAI_PRIMARY_TIMEOUT_SEC | Primary model timeout seconds | 20 |
+|   | OPENAI_FALLBACK_TIMEOUT_SEC | Fallback model timeout seconds | 8 |
+|   | OPENAI_FALLBACK_MODEL | Fallback model name | (empty) |
+|   | OPENAI_MAX_ATTEMPTS | API retry attempts | 3 |
+
+**Behavior:**
+- When primary model times out or exhausts retries, fallback model (if configured) is attempted
+- If both fail, user receives timeout message in Japanese
+- Successful responses are prefixed with `(model: name)` or `(fallback: name)`
+
+**Sample user-facing messages:**
+- Timeout: "申し訳ありませんが、AIサービスがタイムアウトしました。しばらく待ってから再度お試しください。"
+
+**Log events:**
+- `openai_timeout`: Timeout occurred
+- `openai_primary_failed`: Primary model failed
+- `openai_fallback_start`: Fallback attempt started
+- `openai_fallback_success`: Fallback succeeded
+- `openai_fallback_failed`: Fallback failed
+
 ## Architecture - Search Flow
 ```
 user msg -> search_decision.should_perform_web_search()

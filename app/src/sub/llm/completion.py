@@ -30,7 +30,7 @@ from sub.constants import (
 from sub.search.search_decision import should_perform_web_search, SearchDecisionType
 from sub.search.search_context import build_search_context
 from datetime import datetime, timezone
-from sub.llm.openai_wrapper import chat as openai_chat
+from sub.llm.openai_wrapper import chat as openai_chat, chat_with_fallback, OpenAITimeoutError, OpenAIFinalError
 
 import discord
 
@@ -107,11 +107,19 @@ async def generate_completion_response(
             search_executed=search_executed,
         )
         rendered_messages = augment_result.messages
-        response, metrics = await openai_chat(rendered_messages, model=OPENAI_MODEL, purpose="completion")
+        response, metrics, model_used = await chat_with_fallback(rendered_messages, model=OPENAI_MODEL, purpose="completion")
         queue_wait_ms = metrics.get('queue_wait_ms', 0.0)
         invoke_ms = metrics.get('invoke_ms', 0.0)
         attempt_used = metrics.get('attempt', 1)
         reply = response.choices[0]["message"]["content"].strip()
+        
+        # Add model prefix to reply
+        if model_used == "primary":
+            reply = f"(model: {OPENAI_MODEL}) {reply}"
+        elif model_used == "fallback":
+            from sub.constants import OPENAI_FALLBACK_MODEL
+            reply = f"(fallback: {OPENAI_FALLBACK_MODEL}) {reply}"
+        
         reply = sanitize_reply(reply, search_executed)
         usage = getattr(response, "usage", {}) or {}
         prompt_toks = usage.get("prompt_tokens", "?")
@@ -152,6 +160,11 @@ async def generate_completion_response(
             search_status,
         )
         return CompletionData(status=CompletionResult.OK, reply_text=reply, status_text=None)
+    except (OpenAITimeoutError, OpenAIFinalError) as e:
+        logger.warning(f"OpenAI timeout/final error: {e}")
+        # Return user-friendly Japanese timeout message
+        timeout_message = "申し訳ありませんが、AIサービスがタイムアウトしました。しばらく待ってから再度お試しください。"
+        return CompletionData(status=CompletionResult.OK, reply_text=timeout_message, status_text=None)
     except openai.error.InvalidRequestError as e:
         if "This model's maximum context length" in e.user_message:
             return CompletionData(

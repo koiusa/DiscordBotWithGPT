@@ -222,6 +222,26 @@ user message
 |  | `DISCLAIMER_ENABLE_ENGLISH` | 英語免責除去 | 1 | 1 |
 |  | `DISCLAIMER_EXTRA_PATTERNS` | 追加除去正規表現 | foo|bar | なし |
 
+### タイムアウト・フォールバック設定
+| 必須 | 変数 | 説明 | 例 | 既定 |
+| ---- | ---- | ---- | ---- | ---- |
+|  | `OPENAI_PRIMARY_TIMEOUT_SEC` | プライマリモデルタイムアウト秒 | 20 | 20 |
+|  | `OPENAI_FALLBACK_TIMEOUT_SEC` | フォールバックタイムアウト秒 | 8 | 8 |
+|  | `OPENAI_FALLBACK_MODEL` | フォールバックモデル名 | gpt-4o-mini | なし |
+|  | `OPENAI_MAX_ATTEMPTS` | API再試行回数 | 3 | 3 |
+
+**動作仕様:**
+- プライマリモデルでタイムアウト/最大試行回数に達した場合、フォールバックモデル（設定されている場合）を試行
+- フォールバックも失敗した場合、ユーザーへタイムアウトメッセージを返す
+- 成功時は返答に `(model: モデル名)` または `(fallback: モデル名)` のプレフィックスを付与
+
+**ログイベント:**
+- `openai_timeout`: タイムアウト発生
+- `openai_primary_failed`: プライマリモデル失敗
+- `openai_fallback_start`: フォールバック開始
+- `openai_fallback_success`: フォールバック成功
+- `openai_fallback_failed`: フォールバック失敗
+
 `.env.example` を基に環境を整備してください。
 
 ## ログと計測
@@ -235,6 +255,10 @@ event=on_message author_id=123 channel_id=456 preview="hello"
 event=search_decision type=query score=3 reasons=pattern:.+?調べて query="GPU 市場 現在 2025 最新"
 event=openai_call attempt=1 purpose=completion invoke_ms=842.1 prompt_tokens=142 completion_tokens=256 total_tokens=398 model=gpt-4.1
 event=openai_call_failed purpose=completion attempt=3 retriable=True error="rate limit"
+event=openai_timeout purpose=completion attempt=3 timeout=20 model=gpt-4
+event=openai_primary_failed model=gpt-4 purpose=completion error_type=OpenAITimeoutError
+event=openai_fallback_start primary_model=gpt-4 fallback_model=gpt-4o-mini purpose=completion
+event=openai_fallback_success model=gpt-4o-mini purpose=completion
 event=websearch_connectivity status=OK error=-
 event=openai_metrics decision=QUERY decision_score=3 search_status=NO_RESULTS search_executed=False
 ```
