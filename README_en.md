@@ -2,11 +2,11 @@
 
 # DiscordBotWithGPT
 
-Discord bot featuring multi-user contextual conversation, web search (DuckDuckGo + Google fallback), structured logging, automatic summarization, rate limiting, and resilient OpenAI wrapper.
-
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/m/koiusa/DiscordBotWithGPT)](https://github.com/koiusa/DiscordBotWithGPT/graphs/commit-activity)
 [![GitHub issues](https://img.shields.io/github/issues/koiusa/DiscordBotWithGPT)](https://github.com/koiusa/DiscordBotWithGPT/issues)
 [![GitHub license](https://img.shields.io/github/license/koiusa/DiscordBotWithGPT)](https://github.com/koiusa/DiscordBotWithGPT/blob/main/LICENSE)
+
+Discord bot featuring multi-user contextual conversation, web search (DuckDuckGo + Google fallback), structured logging, automatic summarization, rate limiting, and resilient OpenAI wrapper.
 
 ---
 
