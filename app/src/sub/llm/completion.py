@@ -15,21 +15,22 @@ from sub.constants import (
     EXAMPLE_CONVOS,
     OPENAI_MODEL,
 )
-from sub.base import Message
-from sub.utils import split_into_shorter_messages, close_thread, logger
-from sub.websearch import perform_web_search, format_search_results
+from sub.core.base import Message
+from sub.discord.discord_utils import split_into_shorter_messages, close_thread
+from sub.infra.logging import logger
+from sub.search.websearch import perform_web_search, format_search_results
 from sub.disclaimer import sanitize_reply
-from sub.message_augment import augment_messages
+from sub.llm.message_augment import augment_messages
 from sub.constants import (
     SUMMARY_TRIGGER_PROMPT_TOKENS,
     SUMMARY_TARGET_REDUCTION_RATIO,
     SUMMARY_MAX_SOURCE_CHARS,
     SUMMARY_MODEL,
 )
-from sub.search_decision import should_perform_web_search, SearchDecisionType
-from sub.search_context import build_search_context
+from sub.search.search_decision import should_perform_web_search, SearchDecisionType
+from sub.search.search_context import build_search_context
 from datetime import datetime, timezone
-from sub.openai_wrapper import chat as openai_chat
+from sub.llm.openai_wrapper import chat as openai_chat
 
 import discord
 
@@ -95,7 +96,10 @@ async def generate_completion_response(
                 reply_text=decision.direct_answer or "",
                 status_text=None,
             )
-        search_context, search_executed = await build_search_context(decision, messages)
+        search_result = await build_search_context(decision, messages)
+        search_context = search_result.context
+        search_executed = search_result.executed
+        search_status = search_result.status
         augment_result = augment_messages(
             messages,
             conversation_context=conversation_context,
@@ -126,7 +130,7 @@ async def generate_completion_response(
         logger.info(
             "openai_metrics decision=%s decision_score=%s decision_reasons=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s "
             "queue_wait_ms=%.1f invoke_ms=%.1f attempt=%d messages=%d reply_chars=%d cost_prompt=%.6f cost_completion=%.6f cost_total=%.6f summary_applied=%s "
-            "augment_truncated=%s augment_sections=%s search_executed=%s",
+            "augment_truncated=%s augment_sections=%s search_executed=%s search_status=%s",
             decision.decision.name,
             getattr(decision, 'score', '?'),
             getattr(decision, 'reasons', []),
@@ -145,6 +149,7 @@ async def generate_completion_response(
             augment_result.meta.conversation_truncated,
             ','.join(augment_result.meta.sections_applied),
             search_executed,
+            search_status,
         )
         return CompletionData(status=CompletionResult.OK, reply_text=reply, status_text=None)
     except openai.error.InvalidRequestError as e:

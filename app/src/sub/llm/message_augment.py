@@ -2,8 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import re
-from sub.base import Message
-from sub.utils import logger
+from sub.core.base import Message
+from sub.infra.logging import logger
 
 # 将来的に設定化したい値 (必要なら環境変数化)
 DEFAULT_MAX_HISTORY_CHARS = 4000  # 会話履歴インジェクション最大長

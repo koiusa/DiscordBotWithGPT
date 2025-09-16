@@ -2,8 +2,8 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 from typing import Optional
-from sub.websearch import SearchData
-from sub.utils import logger
+from sub.search.websearch import SearchData
+from sub.infra.logging import logger
 import os
 
 CACHE_TTL = int(os.environ.get("WEBSEARCH_CACHE_TTL", "180"))  # seconds

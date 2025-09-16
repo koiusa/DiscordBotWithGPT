@@ -7,7 +7,7 @@ from enum import Enum
 from bs4 import BeautifulSoup
 import urllib.parse
 import time
-from sub.utils import logger
+from sub.infra.logging import logger
 
 
 class SearchResult(Enum):

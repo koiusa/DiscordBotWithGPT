@@ -2,6 +2,7 @@
  - レートリミット (非メンション自動応答)
  - 検索積極モード (SEARCH_AGGRESSIVE_MODE)
 - 構造化ログ (event=... key=value ... 形式)
+  - モジュール階層再編 (infra / discord / search / llm / core 分離進行中)
 ## 開発 / 運用 Tips
 ### ログ
 本Botは主要イベントを 1 行 = 1 イベントの構造化ログで出力します。
@@ -157,6 +158,52 @@ Web Search
 - 免責(リアルタイム不可)自動除去・ガイドライン挿入
 - メッセージ拡張セクション差分更新 (会話/検索/ガイドライン)
 - トークン & コストロギング、要約適用有無、検索実行/キャッシュヒット記録
+
+### アーキテクチャ再編 (完了)
+ディレクトリ階層を責務ごとに分離し保守性と拡張性を向上しました。
+
+新構成:
+```
+sub/
+  infra/        # 横断的基盤 (logging)
+    logging.py  # 構造化ログ (log_event, logger)
+  discord/      # Discord固有ユーティリティ
+    discord_utils.py  # Discord メッセージ変換、スレッド操作等
+  search/       # 検索機能
+    search_decision.py  # 検索要否判定とクエリ最適化
+    search_context.py   # 検索実行とコンテキスト構築
+    websearch.py        # DuckDuckGo/Google 検索実装
+    websearch_cache.py  # 検索結果 LRU+TTL キャッシュ
+  llm/          # LLM呼び出し/トークン管理
+    openai_wrapper.py   # OpenAI ChatCompletion ラッパ
+    completion.py       # 応答生成メインロジック
+    message_augment.py  # メッセージ拡張（会話履歴/検索結果注入）
+    token_utils.py      # トークン概算ユーティリティ
+  core/         # ドメインモデル
+    base.py     # Message, Conversation, Config 等基本データ構造
+  
+  # 互換シム (Deprecation 警告付き)
+  utils.py      # infra.logging / discord.discord_utils 再エクスポート
+  base.py       # core.base 再エクスポート
+  completion.py # llm.completion 再エクスポート
+  (その他旧パス用シム)
+```
+
+移行完了したアイテム:
+- ✅ 構造化ログを `infra.logging` へ統合
+- ✅ Discord依存ユーティリティを `discord.discord_utils` へ分離
+- ✅ 検索関連を `search/` パッケージ化 (判定・実行・キャッシュ)
+- ✅ LLM呼び出しを `llm/` 下に統合 (OpenAI ラッパ・完了・拡張)
+- ✅ ドメインモデルを `core/` 下に配置
+- ✅ 後方互換シムで既存コード保護 (deprecation ログ付き)
+- ✅ 全 import パスを新構成に更新
+
+利用者影響:
+新規開発では新パス（例: `from sub.search.search_decision import ...`）推奨。旧パス利用時は初回のみ deprecation ログが出力されますが機能は保持されます。
+
+将来計画:
+- constants.py の設定読み込み分離 (config_loader)
+- 使用頻度に応じた旧シム段階削除
 
 ### 主要ログ例
 ```
