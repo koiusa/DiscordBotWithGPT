@@ -2,13 +2,13 @@ import discord
 from typing import List, Tuple
 import asyncio
 from datetime import datetime
-from sub.completion import (
+from sub.llm.completion import (
     generate_completion_response,
     process_thread_response,
     process_channel_response,
 )
-from sub.utils import (
-    logger,
+from sub.infra.logging import logger
+from sub.discord.discord_utils import (
     close_thread,
     is_last_message_stale,
     discord_message_to_message,

@@ -1,20 +1,10 @@
-from sub.constants import (
-    ALLOWED_SERVER_IDS,
-)
-import logging
-import time
-from typing import Any, Dict
-
-logger = logging.getLogger(__name__)
-from sub.base import Message
-from discord import Message as DiscordMessage
-from typing import Optional, List
 import discord
-
+from typing import Optional, List
+from sub.core.base import Message
 from sub.constants import MAX_CHARS_PER_REPLY_MSG, INACTIVATE_THREAD_PREFIX
+from sub.infra.logging import logger
 
-
-def discord_message_to_message(message: DiscordMessage) -> Optional[Message]:
+def discord_message_to_message(message: discord.Message) -> Optional[Message]:
     if (
         message.type == discord.MessageType.thread_starter_message
         and message.reference.cached_message
@@ -25,7 +15,6 @@ def discord_message_to_message(message: DiscordMessage) -> Optional[Message]:
         if field.value:
             return Message(role="system", user=field.name, content=field.value)
     else:
-        # Vision対応: 画像がある場合はcontentをリストで格納
         if message.content or message.attachments:
             role = "assistant" if message.author.bot else "user"
             if message.attachments:
@@ -43,16 +32,14 @@ def discord_message_to_message(message: DiscordMessage) -> Optional[Message]:
                 return Message(role=role, user=message.author.name, content=message.content)
     return None
 
-
 def split_into_shorter_messages(message: str) -> List[str]:
     return [
         message[i : i + MAX_CHARS_PER_REPLY_MSG]
         for i in range(0, len(message), MAX_CHARS_PER_REPLY_MSG)
     ]
 
-
 def is_last_message_stale(
-    interaction_message: DiscordMessage, last_message: DiscordMessage, bot_id: str
+    interaction_message: discord.Message, last_message: discord.Message, bot_id: str
 ) -> bool:
     return (
         last_message
@@ -60,7 +47,6 @@ def is_last_message_stale(
         and last_message.author
         and last_message.author.id != bot_id
     )
-
 
 async def close_thread(thread: discord.Thread):
     await thread.edit(name=INACTIVATE_THREAD_PREFIX)
@@ -72,51 +58,9 @@ async def close_thread(thread: discord.Thread):
     )
     await thread.edit(archived=True, locked=True)
 
-
-def should_block(guild: Optional[discord.Guild]) -> bool:
-    if guild is None:
-        # dm's not supported
-        logger.info(f"DM not supported")
-        return True
-
-    if guild.id and guild.id not in ALLOWED_SERVER_IDS:
-        # not allowed in this server
-        logger.info(f"Guild {guild} not allowed")
-        return True
-    return False
-
-
-# ---------------- Structured logging helpers -----------------
-_LOG_START_TIME = time.time()
-
-def _fmt_val(v: Any) -> str:
-    if v is None:
-        return "-"
-    if isinstance(v, (int, float)):
-        return str(v)
-    s = str(v)
-    # 空白や = を含む場合は引用
-    if any(ch in s for ch in [' ', '=', '\n', '\t']):
-        s = s.replace('\n', '↵')[:400]
-        return f'"{s}"'
-    return s[:400]
-
-def log_event(event: str, **fields: Any) -> None:
-    """統一イベントログ: event=<name> kv... を 1 行で出力。
-    目的:
-      - grep / 集計容易化
-      - 監視基盤投入時のパース容易化
-    慣例:
-      - 数値: そのまま
-      - 文字列: 空白/改行/ = 含めば引用
-      - 省略値/不在: '-'
-      - 経過時間: 起動からの秒 `uptime_s`
-    """
-    uptime = time.time() - _LOG_START_TIME
-    base: Dict[str, Any] = {"event": event, "uptime_s": f"{uptime:.1f}"}
-    base.update(fields)
-    parts = []
-    for k, v in base.items():
-        parts.append(f"{k}={_fmt_val(v)}")
-    logger.info(' '.join(parts))
-
+__all__ = [
+    'discord_message_to_message',
+    'split_into_shorter_messages',
+    'is_last_message_stale',
+    'close_thread'
+]

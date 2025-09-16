@@ -21,9 +21,9 @@ from enum import Enum
 from dataclasses import dataclass
 import re
 import datetime
-from sub.base import Message
+from sub.core.base import Message
 import os
-from sub.utils import logger, log_event
+from sub.infra.logging import logger, log_event
 
 def _content_to_text(content) -> str:
     """Message.content がマルチモーダル(list) の場合に text 要素だけ連結して返す。

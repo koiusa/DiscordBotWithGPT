@@ -15,7 +15,7 @@ from typing import List, Pattern
 import re
 import os
 import datetime
-from sub.utils import logger
+from sub.infra.logging import logger
 
 def _current_year_range_patterns(year: int) -> List[str]:
     # Allow dynamic adaptation to new years without code change (e.g., 2025, 2026)

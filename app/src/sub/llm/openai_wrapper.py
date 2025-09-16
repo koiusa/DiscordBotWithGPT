@@ -3,7 +3,7 @@ import time
 import openai
 from typing import List, Dict, Any, Optional, Tuple
 from sub.constants import OPENAI_API_KEY, OPENAI_MODEL
-from sub.utils import logger, log_event
+from sub.infra.logging import logger, log_event
 
 # Public semaphore size can be tuned later
 _DEFAULT_CONCURRENCY = 3

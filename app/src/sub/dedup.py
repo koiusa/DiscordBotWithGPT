@@ -1,7 +1,7 @@
 import time
 import threading
 from typing import Optional
-from sub.utils import logger
+from sub.infra.logging import logger
 
 class MessageDeduplicator:
     """In-memory deduplicator for Discord message IDs.

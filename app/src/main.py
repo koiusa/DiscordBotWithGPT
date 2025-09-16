@@ -16,7 +16,7 @@ except ImportError:
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 
-from sub.base import Message, Conversation
+from sub.core.base import Message, Conversation
 from sub.constants import (
     BOT_INVITE_URL,
     DISCORD_BOT_TOKEN,
@@ -27,13 +27,13 @@ from sub.constants import (
     RATE_LIMIT_WINDOW_SEC,
     RATE_LIMIT_MAX_EVENTS,
 )
-from sub.utils import (
-    logger,
+from sub.infra.logging import (
     should_block,
+    logger,
     log_event,
 )
-from sub import completion
-from sub.completion import (
+from sub.llm import completion
+from sub.llm.completion import (
     generate_completion_response,
     process_thread_response,
     process_channel_response,
@@ -44,7 +44,7 @@ from sub.event import (
     channel_chat,
 )
 from sub.history_store import HistoryStore
-from sub.websearch import perform_web_search, format_search_results
+from sub.search.websearch import perform_web_search, format_search_results
 from sub.dedup import GLOBAL_MESSAGE_DEDUP
 from sub.rate_limit import build_rate_limiter
 
@@ -91,7 +91,7 @@ def schedule_background_tasks():
     # Connectivity quick test
     async def _quick_test():
         try:
-            from sub.websearch import perform_web_search
+            from sub.search.websearch import perform_web_search
             result = await perform_web_search("diagnostic connectivity", max_results=1)
             log_event("websearch_connectivity", status=result.status.name, error=result.error_message)
         except Exception as e:
@@ -201,7 +201,11 @@ async def thread_command(int: discord.Interaction, message: str):
             return
 
         user = int.user
-        log_event("thread_command", user_id=getattr(user,'id',None))
+        log_event("thread_command", user_id=getattr(user,'id',None), message_preview=message[:50])
+        
+        # Acknowledge the command immediately
+        await int.response.defer()
+        
         try:
             embed = discord.Embed(
                 description=f"<@{user.id}> wants to chat! 🤖💬",
@@ -209,13 +213,13 @@ async def thread_command(int: discord.Interaction, message: str):
             )
             embed.add_field(name=user.name, value=message)
 
-            await int.response.send_message(embed=embed)
-            response = await int.original_response()
+            # Send initial response
+            response = await int.followup.send(embed=embed)
 
         except Exception as e:
             logger.exception(e)
-            await int.response.send_message(
-                f"Failed to start chat {str(e)}", ephemeral=True
+            await int.followup.send(
+                f"❌ **エラー**: チャット開始に失敗しました: {str(e)}"
             )
             return
 
@@ -238,9 +242,13 @@ async def thread_command(int: discord.Interaction, message: str):
             )
     except Exception as e:
         logger.exception(e)
-        await int.response.send_message(
-            f"Failed to start chat {str(e)}", ephemeral=True
-        )
+        try:
+            await int.followup.send(
+                f"❌ **エラー**: スレッド作成中にエラーが発生しました: {str(e)}"
+            )
+        except:
+            # If followup fails, log the error
+            logger.error(f"Failed to send error message for thread command: {e}")
 
 # /message message:
 @tree.command(name="message", description="Create a new message for conversation")
@@ -259,7 +267,10 @@ async def message_command(int: discord.Interaction, message: str):
             return
 
         user = int.user
-        log_event("message_command", user_id=getattr(user,'id',None))
+        log_event("message_command", user_id=getattr(user,'id',None), message_preview=message[:50])
+        
+        # Acknowledge the command immediately
+        await int.response.defer()
         
         try:
             embed = discord.Embed(
@@ -268,16 +279,17 @@ async def message_command(int: discord.Interaction, message: str):
             )
             embed.add_field(name=user.name, value=message)
 
-            await int.response.send_message(embed=embed)
-            response = await int.original_response()
+            # Send initial response
+            response = await int.followup.send(embed=embed)
 
         except Exception as e:
             logger.exception(e)
-            await int.response.send_message(
-                f"Failed to start chat {str(e)}", ephemeral=True
+            await int.followup.send(
+                f"❌ **エラー**: チャット開始に失敗しました: {str(e)}"
             )
             return
  
+        # Use typing indicator while processing
         async with int.channel.typing():
             # fetch completion
             messages = [Message(role="system", user=user.name, content=message)]
@@ -290,9 +302,13 @@ async def message_command(int: discord.Interaction, message: str):
             )
     except Exception as e:
         logger.exception(e)
-        await int.response.send_message(
-            f"Failed to start chat {str(e)}", ephemeral=True
-        )
+        try:
+            await int.followup.send(
+                f"❌ **エラー**: メッセージ送信中にエラーが発生しました: {str(e)}"
+            )
+        except:
+            # If followup fails, log the error
+            logger.error(f"Failed to send error message for message command: {e}")
 
 # /websearch query:
 @tree.command(name="websearch", description="Search the web for current information")
@@ -377,7 +393,7 @@ async def diag_command(int: discord.Interaction):
         latency_ms = client.latency * 1000 if client.latency else None
         guild_count = len(client.guilds)
         # quick websearch test
-        from sub.websearch import perform_web_search
+        from sub.search.websearch import perform_web_search
         test_result = await perform_web_search("diagnostic ping", max_results=1)
         status = test_result.status.name
         result_line = "OK" if (test_result.results and len(test_result.results) > 0) else (test_result.error_message or "NO_RESULT")

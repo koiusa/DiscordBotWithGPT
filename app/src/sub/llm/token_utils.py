@@ -3,7 +3,7 @@ Prefer tiktoken if available; otherwise fallback to simple heuristic.
 """
 from __future__ import annotations
 from typing import List, Dict, Any, Union
-from sub.utils import logger
+from sub.infra.logging import logger
 
 try:
     import tiktoken  # type: ignore

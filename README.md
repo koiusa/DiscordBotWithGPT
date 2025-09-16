@@ -1,41 +1,54 @@
-## 機能一覧
- - レートリミット (非メンション自動応答)
- - 検索積極モード (SEARCH_AGGRESSIVE_MODE)
-- 構造化ログ (event=... key=value ... 形式)
-## 開発 / 運用 Tips
-### ログ
-本Botは主要イベントを 1 行 = 1 イベントの構造化ログで出力します。
+<!-- PROJECT HEADER -->
 
-形式:
-```
-event=<名称> uptime_s=<起動から秒> key1=value1 key2="空白含む値" ...
-```
-
-主なイベント例:
-```
-event=on_message author_id=123456 channel_id=789012 preview="hello" uptime_s=12.3
-event=address_check addressed=True reasons=name_prefix uptime_s=12.3
-event=search_decision type=query score=3 reasons=pattern:.*最新 uptime_s=12.4 query="GPU 市場 現在 2025 最新"
-event=openai_call attempt=1 purpose=completion invoke_ms=842.1 queue_wait_ms=0.3 prompt_tokens=142 completion_tokens=256 total_tokens=398 model=gpt-4o
-event=openai_retry attempt=1 sleep_ms=800 retriable=True
-event=openai_call_failed purpose=completion attempt=3 retriable=True error="rate limit"
-event=websearch_connectivity status=OK error=-
-```
-
-検索判定や OpenAI 呼び出しは再試行/失敗/成功をそれぞれ別イベントで可観測化。
-
-集計例 (シェル):
-```bash
-grep 'event=openai_call ' bot.log | awk '{for(i=1;i<=NF;i++){if($i~"invoke_ms="){sub("invoke_ms=","",$i);print $i}}}' | awk '{sum+=$1; n++} END{print "avg_invoke_ms="sum/n}'
-```
-
-カスタム解析ツールへ投入しやすいシンプル形式を優先。JSON が必要な場合は log_event 実装を差し替えても良いです。
 # DiscordBotWithGPT
-
 
 [![GitHub commit activity](https://img.shields.io/github/commit-activity/m/koiusa/DiscordBotWithGPT)](https://github.com/koiusa/DiscordBotWithGPT/graphs/commit-activity)
 [![GitHub issues](https://img.shields.io/github/issues/koiusa/DiscordBotWithGPT)](https://github.com/koiusa/DiscordBotWithGPT/issues)
 [![GitHub license](https://img.shields.io/github/license/koiusa/DiscordBotWithGPT)](https://github.com/koiusa/DiscordBotWithGPT/blob/main/LICENSE)
+
+複数ユーザー同時会話・要約・外部 Web 検索（DuckDuckGo + Google Fallback）・構造化ログ・再試行付き OpenAI ラッパ等を備えた Discord Bot。運用可観測性と拡張性を優先した構成です。
+
+---
+
+## 目次
+1. [主な機能](#主な機能)
+2. [スクリーンショット / 動作イメージ (任意)](#スクリーンショット--動作イメージ)
+3. [セットアップ](#セットアップ)
+4. [環境変数](#環境変数)
+5. [検索アーキテクチャ](#検索アーキテクチャ)
+6. [ログと計測](#ログと計測)
+7. [ディレクトリ構成](#ディレクトリ構成)
+8. [動作開始 / 起動方法](#動作開始--起動方法)
+9. [Slash コマンド](#slash-コマンド)
+10. [ユーザー識別と履歴管理](#ユーザー識別と履歴管理)
+11. [要約機能](#要約機能)
+12. [レート制限とスパム防止](#レート制限とスパム防止)
+13. [開発 Tips](#開発-tips)
+14. [トラブルシューティング](#トラブルシューティング)
+15. [参考 / クレジット](#参考--クレジット)
+
+---
+
+## 主な機能
+| 分類 | 機能 | 説明 |
+| ---- | ---- | ---- |
+| 会話 | 複数ユーザー識別 | `username(userId): content` 形式で履歴をLLMへ提供 |
+| 会話 | 循環履歴バッファ | `HISTORY_MAX_ITEMS` で制御 (古いものから削除) |
+| 会話 | 長文要約 | プロンプトが閾値超過時に自動要約し圧縮 (再参照可能) |
+| 検索 | 検索要否判定スコアリング | 正規表現 + 疑問語 + 年度/時制トークン + Aggressive Mode |
+| 検索 | DuckDuckGo + Google Fallback | 0件時にフォールバック / NO_RESULTS を明示 |
+| 検索 | キャッシュ | LRU + TTL (`WEBSEARCH_CACHE_*`) |
+| 検索 | ステータス分類 | OK / NO_RESULTS / ERROR / SKIPPED をログ出力 |
+| 出力 | メッセージ拡張セクション | 会話 / 検索 / ガイドライン を差分注入 |
+| コスト | トークン概算 / コスト試算 | `OPENAI_*_TOKEN_COST` による課金額目安表示 |
+| 信頼性 | OpenAI ラッパ | 再試行 / バックオフ / メトリクス計測 |
+| レート制御 | 非メンション応答レート制限 | 簡易 per-user window ベース制御 |
+| 運用 | 構造化ログ | 1行=1イベント `key=value` 形式 (grep / awk 解析容易) |
+| 運用 | Heartbeat | 30sごとのレイテンシ報告 |
+| 運用 | 診断コマンド | `/diag` で quick websearch + latency |
+| 互換 | 旧パス再エクスポート | 移行期間の破壊的変更緩和 (deprecation ログ) |
+
+---
 
 ### Testing Env
 ```
@@ -61,7 +74,7 @@ gpt-4.1
 
 ---
 
-### Setup
+## セットアップ
 
 #### Create Discord Bot
  - [discord_developers](https://discord.com/developers/applications)
@@ -69,8 +82,8 @@ gpt-4.1
 #### Getting OpenApi ApiKey
  - [openai_platform](https://platform.openai.com)
 
-#### Setting Env File
-以下の手順で.envファイルを作成・設定してください。
+### `.env` の作成
+以下の手順で `.env` を作成・設定します。
 
 1. `.env.example` をコピーして `.env` ファイルを作成します。
     ```bash
@@ -83,8 +96,8 @@ gpt-4.1
     - `ALLOWED_SERVER_IDS` にはBotを許可するサーバーIDをカンマ区切りで入力します。
 3. 必要に応じて他の項目も設定してください。
 
-#### モデル・システムプロンプトの設定
-`app/src/sub/config.yaml` で、使用するAIモデルやシステムプロンプトの内容を設定できます。
+### モデル・システムプロンプト設定
+`app/src/sub/config.yaml` でモデル / bot 名 / システムプロンプト例を定義:
 ```bash app/src/sub/config.yaml
 model: gpt-4.1
 name: Chappie
@@ -95,22 +108,17 @@ example_conversations:
       content: あなたはChappieです。優秀なAIアシスタントでユーザーの様々な質問に答えます。会話履歴では username(userId): content 形式で与えられます。ユーザーIDで同一人物性を判断し、混同しないでください。複数のユーザーが参加している場合は、それぞれのユーザーを区別して適切に応答してください。
 ```
 
-### ユーザー識別機能
-v1.1.0 以降、複数ユーザーが同一チャンネルで会話する際に、AIが発言者を正確に識別できるようになりました。
-
-#### 主な機能:
-- **会話履歴の保存**: チャンネル単位で会話履歴を自動保存（デフォルト30件まで）
-- **発言者の識別**: `username(userId): content` 形式でAIに会話履歴を提供
-- **循環バッファ**: 設定した件数を超えると古いメッセージから自動削除
-
-#### 設定項目:
-- `HISTORY_MAX_ITEMS`: 保持する会話履歴の最大件数（デフォルト: 30）
+## ユーザー識別機能
+複数ユーザー混在チャンネルでの「だれが何を言ったか」を安定供給:
+* チャンネル単位の短期履歴を循環保持 (`HISTORY_MAX_ITEMS`)
+* LLM へは `username(userId): content` フォーマットで送信 (ユーザー混同防止)
+* 直前メッセージは別引数として明示し、コンテキスト圧縮時も話者情報保持
 
 ---
 
-### Startup
+## 動作開始 / 起動方法
 
-#### Docker Compose で起動
+### Docker Compose
 
 ```bash
 cd path/to/DiscordBotWithGPT
@@ -122,7 +130,7 @@ docker-compose up -d
 
 ---
 
-### Discord command
+## Slash コマンド
 
 Chat Start on Thread 
 ```
@@ -149,42 +157,118 @@ Web Search
 
 ---
 
-### 追加機能 (Refactor 後)
-- Web検索 (DuckDuckGo + Google Fallback) + 検索要否スコアリング
-- 会話要約 (しきい値超過時に自動圧縮 `SUMMARY_*` 環境変数で調整)
-- OpenAI 呼び出し共通ラッパ (再試行 / セマフォ / 計測)
-- 検索結果キャッシュ (LRU + TTL / `WEBSEARCH_CACHE_*`)
-- 免責(リアルタイム不可)自動除去・ガイドライン挿入
-- メッセージ拡張セクション差分更新 (会話/検索/ガイドライン)
-- トークン & コストロギング、要約適用有無、検索実行/キャッシュヒット記録
-
-### 主要ログ例
+## ディレクトリ構成
 ```
-openai_metrics decision=QUERY decision_score=3 decision_reasons=['pattern:.*最新', 'factual_keyword'] \
-  prompt_tokens=1234 completion_tokens=456 total_tokens=1690 queue_wait_ms=12.3 invoke_ms=842.1 attempt=1 \
-  messages=9 reply_chars=1023 cost_prompt=0.006170 cost_completion=0.006840 cost_total=0.013010 \
-  summary_applied=True augment_truncated=False augment_sections=### <CONVERSATION_CONTEXT>,### <SEARCH_CONTEXT>,### <GUIDELINE> search_executed=True
+app/src/sub/
+  core/          # ドメインモデル (Message, Conversation, Config ...)
+  infra/         # 横断基盤 (logging)
+  discord/       # Discord 特有ユーティリティ (ID変換等)
+  llm/           # OpenAI 呼び出し & 生成ロジック
+  search/        # 検索判定/実行/キャッシュ/コンテキスト化
+  history_store.py  # チャンネル別履歴保持
+  format_conversation.py # 履歴→プロンプト整形
 ```
+後方互換シムは段階的削除予定。新規コードは新パスを利用してください。
 
-### 追加環境変数
-| 変数 | 説明 | 例 | 既定 |
-| ---- | ---- | ---- | ---- |
-| `SUMMARY_TRIGGER_PROMPT_TOKENS` | 概算プロンプトトークン数しきい値 | 2800 | 2800 |
-| `SUMMARY_TARGET_REDUCTION_RATIO` | 要約後目標長 (元の何倍) | 0.5 | 0.5 |
-| `SUMMARY_MAX_SOURCE_CHARS` | 要約対象の最大文字数 | 8000 | 8000 |
-| `SUMMARY_MODEL` | 要約モデル (未指定ならメイン) | gpt-4o-mini | main model |
-| `WEBSEARCH_CACHE_TTL` | 検索キャッシュ TTL 秒 | 300 | 180 |
-| `WEBSEARCH_CACHE_MAX` | キャッシュ最大件数 | 256 | 128 |
-| `RESPOND_WITHOUT_MENTION` | メンション無しでも通常チャンネルで自動応答(1で有効) | 1 | 1 |
-| `RATE_LIMIT_WINDOW_SEC` | 非メンション自動応答対象のレート制限ウィンドウ秒 | 30 | 30 |
-| `RATE_LIMIT_MAX_EVENTS` | ウィンドウ内ユーザー毎最大メッセージ数 | 5 | 5 |
-| `DISCLAIMER_ENABLE_ENGLISH` | 英語の免責/不要定型文も除去 (1=する/0=しない) | 1 | 1 |
-| `DISCLAIMER_EXTRA_PATTERNS` | 追加除去したい正規表現パターン(|区切り) |  |  |
-| `SEARCH_AGGRESSIVE_MODE` | 検索トリガを緩和し積極的に検索 (1=有効) | 0 | 0 |
+## 検索アーキテクチャ
+```
+user message
+  └─ search_decision.should_perform_web_search() → SearchDecision
+        ├─ DATETIME_ANSWER: 即時日付回答
+        ├─ QUERY: クエリ最適化 → websearch.perform_web_search()
+        └─ NONE: 検索スキップ
+  └─ search_context.build_search_context() / (結果0件時 NO_RESULTS フォールバック文)
+  └─ message_augment: <SEARCH_CONTEXT> セクションとして LLM プロンプトへ注入
+  └─ completion: openai 呼び出し / メトリクスログ
+```
+ステータス:
+| status | 意味 | `search_executed` |
+| ------ | ---- | ---------------- |
+| OK | 結果 >=1 件を取得し要約挿入 | False (結果はテキスト注入で十分 / 二次実行不要の設計) |
+| NO_RESULTS | 検索実行したが 0 件 → フォールバック文章挿入 | False |
+| SKIPPED | そもそも検索不要判定 | False |
+| ERROR | 検索中例外 → エラーメッセージを代替挿入 | False |
 
-`.env.example` を参照して `.env` を作成してください。
+`search_injected=True` は <SEARCH_CONTEXT> がプロンプトに含まれたことを意味。結果 0 件でも **検索を試行した事実 + フォールバック案内** がユーザー回答に反映されるため、ユーザー混乱を低減します。
 
-### セキュリティ注意
+## 要約機能
+プロンプト文字数が `SUMMARY_TRIGGER_PROMPT_TOKENS` を超過 → 直近会話の一部を要約し再注入。
+結果ログ例: `summary_applied=True` / `augment_sections=...` に `<SUMMARY>` が含まれる (今後拡張予定)。
+
+## レート制限とスパム防止
+非メンション応答を許可 (`RESPOND_WITHOUT_MENTION=1`) している場合のみ、ユーザー毎スライディングウィンドウでドロップ: `RATE_LIMIT_WINDOW_SEC` / `RATE_LIMIT_MAX_EVENTS`。
+
+## 環境変数
+| 必須 | 変数 | 説明 | 例 | 既定 |
+| ---- | ---- | ---- | ---- | ---- |
+| ✅ | `DISCORD_BOT_TOKEN` | Discord Bot Token | (secret) | なし |
+| ✅ | `DISCORD_CLIENT_ID` | Bot アプリ Client ID | 1234567890 | なし |
+| ✅ | `OPENAI_API_KEY` | OpenAI API Key | sk-xxxx | なし |
+| ✅ | `ALLOWED_SERVER_IDS` | 許可サーバIDカンマ区切り | 123,456 | なし |
+| ✅ | `PERMISSIONS` | Bot 招待権限ビット | 17179937792 | なし |
+|  | `OPENAI_PROMPT_TOKEN_COST` | 1K prompt tokens USD | 0.0095 | 0.0 |
+|  | `OPENAI_COMPLETION_TOKEN_COST` | 1K completion tokens USD | 0.030 | 0.0 |
+|  | `HISTORY_MAX_ITEMS` | 1チャンネル履歴件数 | 30 | 30 |
+|  | `RESPOND_WITHOUT_MENTION` | メンション不要応答 | 1 | 1 |
+|  | `RATE_LIMIT_WINDOW_SEC` | レート窓秒 | 30 | 30 |
+|  | `RATE_LIMIT_MAX_EVENTS` | 窓内最大メッセージ | 5 | 5 |
+|  | `SEARCH_AGGRESSIVE_MODE` | 検索閾値緩和 | 1 | 0 |
+|  | `WEBSEARCH_CACHE_TTL` | 検索キャッシュ秒 | 300 | 180 |
+|  | `WEBSEARCH_CACHE_MAX` | キャッシュ件数 | 256 | 128 |
+|  | `SUMMARY_TRIGGER_PROMPT_TOKENS` | 要約発火トークン概算 | 2800 | 2800 |
+|  | `SUMMARY_TARGET_REDUCTION_RATIO` | 要約後比率 | 0.5 | 0.5 |
+|  | `SUMMARY_MAX_SOURCE_CHARS` | 要約入力最大文字 | 8000 | 8000 |
+|  | `SUMMARY_MODEL` | 要約専用モデル | gpt-4o-mini | メインモデル |
+|  | `DISCLAIMER_ENABLE_ENGLISH` | 英語免責除去 | 1 | 1 |
+|  | `DISCLAIMER_EXTRA_PATTERNS` | 追加除去正規表現 | foo|bar | なし |
+
+`.env.example` を基に環境を整備してください。
+
+## ログと計測
+1イベント=1行、`key=value` スペース区切り。
+```
+event=<名称> uptime_s=<起動秒> key1=value1 key2="空白含む値" ...
+```
+主要例:
+```
+event=on_message author_id=123 channel_id=456 preview="hello"
+event=search_decision type=query score=3 reasons=pattern:.+?調べて query="GPU 市場 現在 2025 最新"
+event=openai_call attempt=1 purpose=completion invoke_ms=842.1 prompt_tokens=142 completion_tokens=256 total_tokens=398 model=gpt-4.1
+event=openai_call_failed purpose=completion attempt=3 retriable=True error="rate limit"
+event=websearch_connectivity status=OK error=-
+event=openai_metrics decision=QUERY decision_score=3 search_status=NO_RESULTS search_executed=False
+```
+集計例:
+```bash
+grep 'event=openai_call ' bot.log | awk '{for(i=1;i<=NF;i++){if($i~"invoke_ms="){sub("invoke_ms=","",$i);print $i}}}' | awk '{sum+=$1; n++} END{print "avg_invoke_ms="sum/n}'
+```
+JSON が必要なら `infra/logging.py` を差し替えてください。
+
+## 開発 Tips
+ローカル実行 (直接):
+```bash
+pip install -r app/requirements.txt
+python app/src/main.py
+```
+型/静的解析は必要に応じて mypy / ruff 等を導入推奨。
+
+## トラブルシューティング
+| 症状 | 原因 | 対処 |
+| ---- | ---- | ---- |
+| Bot が返信しない | ALLOWED_SERVER_IDS 未設定 | `.env` を再確認 |
+| 検索が常に NO_RESULTS | ネットワーク遮断 / 取得0件正常 | `websearch_connectivity` ログ確認 |
+| トークンコスト 0 のまま | `OPENAI_*_TOKEN_COST` 未設定 | 課金単価を設定 |
+| 旧 import が警告 | 後方互換シム | 新パスへ移行 |
+| 要約が走らない | トークン閾値未達 | `SUMMARY_TRIGGER_PROMPT_TOKENS` を下げる |
+
+## 参考 / クレジット
+ - [gpt-discord-bot](https://github.com/openai/gpt-discord-bot)
+ - OpenAI / Discord / DuckDuckGo / BeautifulSoup などの各ライブラリ作者に感謝。
+
+---
+以下は英語 README との同期対象（必要に応じて英語版更新）。
+
+## セキュリティ注意
 リポジトリに本物の API キーをコミットしないでください。万一履歴に含めた場合は以下を実施:
 1. OpenAI / Discord でキー再発行
 2. 旧キー無効化
@@ -207,11 +291,10 @@ echo ".env" >> .gitignore
 4. `RESPOND_WITHOUT_MENTION=0` に戻せば従来どおりメンション/名前/リプライ時のみ応答
 5. スパム保護: `RATE_LIMIT_WINDOW_SEC` (既定30秒) と `RATE_LIMIT_MAX_EVENTS` (既定5件) を超えると非メンション自動応答を一時的に無視
 
-### 積極検索モード
-`SEARCH_AGGRESSIVE_MODE=1` を設定すると以下が有効になります:
-1. スコア閾値 `min_score` を 2 → 1 に引き下げ (より多くのメッセージで検索)
-2. 明示的スコア0でも以下条件で検索候補化: 末尾 `?` / `？` / 含む語: `教えて`, `とは`, `まとめて`, `一覧`
-3. ログに `aggressive_form` が理由として追加されるケースあり
-用途: 情報探索寄りのサーバーで検索ヒット率を高めたい場合。
-注意: 外部検索回数増 → レイテンシ/トークン消費上昇。
+### 積極検索モード (Aggressive Mode)
+`SEARCH_AGGRESSIVE_MODE=1`:
+* 最低スコア閾値を 2 → 1
+* 末尾 `?` / `？` / 語彙 `教えて|とは|まとめて|一覧` 含有でスコア0 → 1 に昇格
+* `reasons=aggressive_form` が付与される場合あり
+検索頻度 ↑ = レイテンシ / トークン増を許容できる探索向けサーバで有効化推奨。
 
