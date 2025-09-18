@@ -115,11 +115,11 @@ async def generate_completion_response(
         
         # Add model prefix to reply
         if model_used == "primary":
-            reply = f"(model: {OPENAI_MODEL}) {reply}"
+            reply = f"(model: {OPENAI_MODEL}) \n {reply}"
         elif model_used == "fallback":
             from sub.constants import OPENAI_FALLBACK_MODEL
-            reply = f"(fallback: {OPENAI_FALLBACK_MODEL}) {reply}"
-        
+            reply = f"(fallback: {OPENAI_FALLBACK_MODEL}) \n {reply}"
+
         reply = sanitize_reply(reply, search_executed)
         usage = getattr(response, "usage", {}) or {}
         prompt_toks = usage.get("prompt_tokens", "?")
