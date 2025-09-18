@@ -33,13 +33,16 @@ PERMISSIONS = os.environ["PERMISSIONS"]
 ALLOWED_SERVER_IDS: List[int] = []
 server_ids = os.environ["ALLOWED_SERVER_IDS"].split(",")
 for s in server_ids:
-    ALLOWED_SERVER_IDS.append(int(s))
+    if s.strip():  # skip empty segments
+        ALLOWED_SERVER_IDS.append(int(s.strip()))
 
 SERVER_TO_MODERATION_CHANNEL: Dict[int, int] = {}
 server_channels = os.environ.get("SERVER_TO_MODERATION_CHANNEL", "").split(",")
 for s in server_channels:
-    values = s.split(":")
-    SERVER_TO_MODERATION_CHANNEL[int(values[0])] = int(values[1])
+    if s.strip():  # skip empty segments
+        values = s.split(":")
+        if len(values) == 2 and values[0].strip() and values[1].strip():
+            SERVER_TO_MODERATION_CHANNEL[int(values[0].strip())] = int(values[1].strip())
 
 # Send Messages, Create Public Threads, Send Messages in Threads, Manage Messages, Manage Threads, Read Message History, Use Slash Command
 BOT_INVITE_URL = f"https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&permissions={PERMISSIONS}&scope=bot"
@@ -64,3 +67,9 @@ RESPOND_WITHOUT_MENTION = int(os.environ.get("RESPOND_WITHOUT_MENTION", "1"))
 # Simple per-user rate limiting (only applied to non-addressed fallback path)
 RATE_LIMIT_WINDOW_SEC = int(os.environ.get("RATE_LIMIT_WINDOW_SEC", "30"))  # sliding window seconds
 RATE_LIMIT_MAX_EVENTS = int(os.environ.get("RATE_LIMIT_MAX_EVENTS", "5"))   # max messages per user per window
+
+# OpenAI timeout and fallback configuration
+OPENAI_PRIMARY_TIMEOUT_SEC = int(os.environ.get("OPENAI_PRIMARY_TIMEOUT_SEC", "20"))  # primary model timeout
+OPENAI_FALLBACK_TIMEOUT_SEC = int(os.environ.get("OPENAI_FALLBACK_TIMEOUT_SEC", "8"))  # fallback model timeout
+OPENAI_FALLBACK_MODEL = os.environ.get("OPENAI_FALLBACK_MODEL", "")  # optional fallback model
+OPENAI_MAX_ATTEMPTS = int(os.environ.get("OPENAI_MAX_ATTEMPTS", "3"))  # max retry attempts
