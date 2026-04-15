@@ -9,8 +9,9 @@ load_dotenv()
 
 # load config.yaml
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+CONFIG_PATH = os.environ.get("CONFIG_PATH", os.path.join(SCRIPT_DIR, "config.yaml"))
 CONFIG: Config = dacite.from_dict(
-    Config, yaml.safe_load(open(os.path.join(SCRIPT_DIR, "config.yaml"), "r"))
+    Config, yaml.safe_load(open(CONFIG_PATH, "r"))
 )
 
 BOT_NAME = CONFIG.name
