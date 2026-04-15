@@ -15,7 +15,7 @@ CONFIG: Config = dacite.from_dict(
 
 BOT_NAME = CONFIG.name
 EXAMPLE_CONVOS = CONFIG.example_conversations
-OPENAI_MODEL = CONFIG.model
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", CONFIG.model)
 OPENAI_PROMPT_TOKEN_COST = float(os.environ.get("OPENAI_PROMPT_TOKEN_COST", "0.0"))  # USD per 1k tokens
 OPENAI_COMPLETION_TOKEN_COST = float(os.environ.get("OPENAI_COMPLETION_TOKEN_COST", "0.0"))  # USD per 1k tokens
 
