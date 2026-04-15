@@ -29,3 +29,4 @@ class Conversation:
 class Config:
     name: str
     example_conversations: List[Conversation]
+    model: str = "gpt-4.1"
